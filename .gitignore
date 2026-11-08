@@ -1,0 +1,19 @@
+*.iml
+.gradle/
+.kotlin/
+.idea/
+build/
+app/build/
+local.properties
+captures/
+*.apk
+*.aab
+*.hprof
+*.log
+.DS_Store
+
+# Wallpapers with unclear redistribution rights. Keep your own copies locally;
+# the app skips any bundled wallpaper whose file is missing.
+app/src/main/assets/wallpaper_alhambra.jpg
+app/src/main/assets/wallpaper_interior.jpg
+app/src/main/assets/wallpaper_art_room.jpg
