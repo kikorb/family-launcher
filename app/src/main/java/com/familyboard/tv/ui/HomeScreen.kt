@@ -78,6 +78,8 @@ fun HomeScreen(
     onAppsGridIndexChange: (Int) -> Unit,
     monthDayFocusedIndex: Int,
     onMonthDayIndexChange: (Int) -> Unit,
+    monthOffset: Int = 0,
+    onChangeMonth: (Int) -> Unit = {},
     listFocusedColumn: Int,
     onListColumnChange: (Int) -> Unit,
     taskFocusedIndex: Int,
@@ -114,7 +116,7 @@ fun HomeScreen(
     taskWhoOptions: List<String> = emptyList(),
     groceryTypeOptions: List<String> = emptyList(),
     eventTypeOptions: List<String> = emptyList(),
-    onSubmitEntry: (String, String) -> Unit = { _, _ -> },
+    onSubmitEntry: (String, String, Boolean) -> Unit = { _, _, _ -> },
     onCancelEntry: () -> Unit = {}
 ) {
     // Intercept Back button: return to clean Wallpaper Center
@@ -273,6 +275,8 @@ fun HomeScreen(
                 events = events,
                 isDarkMode = isDarkMode,
                 focusedDay = monthDayFocusedIndex,
+                monthOffset = monthOffset,
+                onChangeMonth = onChangeMonth,
                 onOpenCalendarChoice = onOpenCalendarChoice,
                 onClose = { onActiveSectionChange(ActiveSection.CENTER) }
             )
@@ -469,7 +473,7 @@ private fun CalendarChoiceOverlay(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     events.forEachIndexed { i, ev ->
                         OverlayButton(
-                            label = "✎ ${ev.title}" + if (ev.type.isNotBlank()) "  ·  ${ev.type}" else "",
+                            label = "✎ ${ev.title}" + (if (ev.type.isNotBlank()) "  ·  ${ev.type}" else "") + (if (ev.repeatsYearly) "  ↻" else ""),
                             focused = selectedIndex == i + 2,
                             isDarkMode = isDarkMode,
                             onClick = { onChoose(i + 2) }
@@ -481,18 +485,20 @@ private fun CalendarChoiceOverlay(
     }
 }
 
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class, androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 private fun EntryFormOverlay(
     form: EntryForm,
     options: List<String>,
     isDarkMode: Boolean,
-    onSubmit: (String, String) -> Unit,
+    onSubmit: (String, String, Boolean) -> Unit,
     onCancel: () -> Unit
 ) {
     val titleColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
     val subtextColor = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
     var text by remember { mutableStateOf(form.initialText) }
+    var repeat by remember { mutableStateOf(form.initialRepeat) }
+    var repeatTouched by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(form.initialOption) }
     val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
@@ -500,8 +506,15 @@ private fun EntryFormOverlay(
     var fieldFocused by remember { mutableStateOf(false) }
     var addFocused by remember { mutableStateOf(false) }
     var cancelFocused by remember { mutableStateOf(false) }
-    val chipRequesters = remember(options) { (listOf("") + options).associateWith { androidx.compose.ui.focus.FocusRequester() } }
+    val optionList = remember(options) { listOf("") + options }
+    val chipRequesters = remember(options) { optionList.associateWith { androidx.compose.ui.focus.FocusRequester() } }
     val addRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    val cancelRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    val toggleRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    val stop = androidx.compose.ui.focus.FocusRequester.Cancel
+    val hasToggle = form.kind == EntryKind.EVENT
+    val belowChips = if (hasToggle) toggleRequester else addRequester
+    val aboveButtons = if (hasToggle) toggleRequester else (chipRequesters[selected] ?: focusRequester)
 
     val isEdit = form.editId != null
     val optionLabel = if (form.kind == EntryKind.TASK) "Quién" else "Tipo"
@@ -513,7 +526,7 @@ private fun EntryFormOverlay(
 
     fun submit() {
         val value = text.trim()
-        if (value.isNotEmpty()) onSubmit(value, selected) else onCancel()
+        if (value.isNotEmpty()) onSubmit(value, selected, repeat && form.kind == EntryKind.EVENT) else onCancel()
     }
 
     LaunchedEffect(Unit) {
@@ -551,11 +564,16 @@ private fun EntryFormOverlay(
                 ),
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onNext = {
                     keyboard?.hide()
-                    (chipRequesters[selected] ?: chipRequesters[""] ?: addRequester).requestFocus()
+                    (chipRequesters[selected] ?: belowChips).requestFocus()
                 }),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .focusProperties { down = chipRequesters[selected] ?: chipRequesters[""] ?: addRequester }
+                    .focusProperties {
+                        down = chipRequesters[selected] ?: belowChips
+                        up = stop
+                        left = stop
+                        right = stop
+                    }
                     .focusRequester(focusRequester)
                     .onFocusChanged {
                         fieldFocused = it.isFocused
@@ -583,12 +601,18 @@ private fun EntryFormOverlay(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    (listOf("") + options).forEach { option ->
+                    optionList.forEachIndexed { index, option ->
                         var chipFocused by remember { mutableStateOf(false) }
                         val isSelected = option == selected
                         Box(
                             modifier = Modifier
                                 .focusRequester(chipRequesters.getValue(option))
+                                .focusProperties {
+                                    left = if (index > 0) chipRequesters.getValue(optionList[index - 1]) else stop
+                                    right = if (index < optionList.lastIndex) chipRequesters.getValue(optionList[index + 1]) else stop
+                                    up = focusRequester
+                                    down = belowChips
+                                }
                                 .onFocusChanged { chipFocused = it.isFocused }
                                 .clip(RoundedCornerShape(50.dp))
                                 .background(
@@ -601,7 +625,12 @@ private fun EntryFormOverlay(
                                     color = if (chipFocused) FocusCyan else if (isSelected) FocusCyan else if (isDarkMode) Color(0x44FFFFFF) else Color(0x22000000),
                                     shape = RoundedCornerShape(50.dp)
                                 )
-                                .clickable { selected = option }
+                                .clickable {
+                                    selected = option
+                                    if (form.kind == EntryKind.EVENT && form.editId == null && !repeatTouched) {
+                                        repeat = option.contains("cumple", ignoreCase = true)
+                                    }
+                                }
                                 .padding(horizontal = 16.dp, vertical = 8.dp)
                         ) {
                             Text(
@@ -615,6 +644,44 @@ private fun EntryFormOverlay(
                 }
             }
 
+            if (form.kind == EntryKind.EVENT) {
+                var repeatFocused by remember { mutableStateOf(false) }
+                Box(
+                    modifier = Modifier
+                        .focusRequester(toggleRequester)
+                        .focusProperties {
+                            up = chipRequesters[selected] ?: focusRequester
+                            down = addRequester
+                            left = stop
+                            right = stop
+                        }
+                        .onFocusChanged { repeatFocused = it.isFocused }
+                        .clip(RoundedCornerShape(50.dp))
+                        .background(
+                            if (repeatFocused) FocusCyan
+                            else if (repeat) Color(0x4438BDF8)
+                            else if (isDarkMode) Color(0x22FFFFFF) else Color(0x12000000)
+                        )
+                        .border(
+                            width = if (repeatFocused || repeat) 2.dp else 1.dp,
+                            color = if (repeatFocused || repeat) FocusCyan else if (isDarkMode) Color(0x44FFFFFF) else Color(0x22000000),
+                            shape = RoundedCornerShape(50.dp)
+                        )
+                        .clickable {
+                            repeat = !repeat
+                            repeatTouched = true
+                        }
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = (if (repeat) "☑" else "☐") + "  ↻ Repetir cada año",
+                        fontSize = 15.sp,
+                        fontWeight = if (repeat) FontWeight.Bold else FontWeight.Medium,
+                        color = if (repeatFocused) Color.Black else titleColor
+                    )
+                }
+            }
+
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 OverlayButton(
                     label = if (isEdit) "✓ Guardar" else "✓ Añadir",
@@ -623,6 +690,12 @@ private fun EntryFormOverlay(
                     onClick = { submit() },
                     modifier = Modifier
                         .focusRequester(addRequester)
+                        .focusProperties {
+                            up = aboveButtons
+                            down = stop
+                            left = stop
+                            right = cancelRequester
+                        }
                         .onFocusChanged { addFocused = it.isFocused }
                 )
                 OverlayButton(
@@ -630,7 +703,15 @@ private fun EntryFormOverlay(
                     focused = cancelFocused,
                     isDarkMode = isDarkMode,
                     onClick = onCancel,
-                    modifier = Modifier.onFocusChanged { cancelFocused = it.isFocused }
+                    modifier = Modifier
+                        .focusRequester(cancelRequester)
+                        .focusProperties {
+                            up = aboveButtons
+                            down = stop
+                            left = addRequester
+                            right = stop
+                        }
+                        .onFocusChanged { cancelFocused = it.isFocused }
                 )
             }
         }
@@ -1434,6 +1515,26 @@ private fun ScreenHeader(title: String, titleColor: Color, isDarkMode: Boolean, 
     }
 }
 
+@Composable
+private fun MonthArrow(symbol: String, focused: Boolean, isDarkMode: Boolean, titleColor: Color, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .scale(if (focused) 1.12f else 1f)
+            .clip(CircleShape)
+            .background(if (focused) FocusCyan else if (isDarkMode) Color(0x22FFFFFF) else Color(0x15000000))
+            .border(
+                width = if (focused) 2.dp else 1.dp,
+                color = if (focused) FocusCyan else if (isDarkMode) Color(0x44FFFFFF) else Color(0x22000000),
+                shape = CircleShape
+            )
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text = symbol, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = if (focused) Color.Black else titleColor)
+    }
+}
+
 // -----------------------------------------------------------------------------
 // DRAWER 2 (UP ▲): FULL MONTH CLEAN CALENDAR (MONDAY TO SUNDAY)
 // -----------------------------------------------------------------------------
@@ -1443,6 +1544,8 @@ fun MonthCalendarScreen(
     events: List<CalendarEvent>,
     isDarkMode: Boolean,
     focusedDay: Int,
+    monthOffset: Int = 0,
+    onChangeMonth: (Int) -> Unit = {},
     onOpenCalendarChoice: (String) -> Unit = {},
     onClose: () -> Unit
 ) {
@@ -1451,16 +1554,18 @@ fun MonthCalendarScreen(
     val cardBg = if (isDarkMode) Color(0x14FFFFFF) else Color(0xEEFFFFFF)
     val cardBorder = if (isDarkMode) Color(0x22FFFFFF) else Color(0x18000000)
 
-    val now = remember { Calendar.getInstance() }
-    val monthTitle = remember {
+    val now = remember(monthOffset) {
+        Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_MONTH, 1)
+            add(Calendar.MONTH, monthOffset)
+        }
+    }
+    val monthTitle = remember(monthOffset) {
         SimpleDateFormat("MMMM yyyy", Locale("es", "ES")).format(now.time).replaceFirstChar { it.uppercase() }
     }
-    val daysInMonth = remember { now.getActualMaximum(Calendar.DAY_OF_MONTH) }
-    val todayNum = remember { now.get(Calendar.DAY_OF_MONTH) }
-    val emptyLeadingDays = remember {
-        val firstDayCal = (now.clone() as Calendar).apply { set(Calendar.DAY_OF_MONTH, 1) }
-        (firstDayCal.get(Calendar.DAY_OF_WEEK) - Calendar.MONDAY + 7) % 7
-    }
+    val daysInMonth = remember(monthOffset) { now.getActualMaximum(Calendar.DAY_OF_MONTH) }
+    val todayNum = if (monthOffset == 0) Calendar.getInstance().get(Calendar.DAY_OF_MONTH) else -1
+    val emptyLeadingDays = remember(monthOffset) { (now.get(Calendar.DAY_OF_WEEK) - Calendar.MONDAY + 7) % 7 }
     val weekCount = (emptyLeadingDays + daysInMonth + 6) / 7
     val weekdayHeaders = listOf("LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM")
 
@@ -1470,7 +1575,34 @@ fun MonthCalendarScreen(
             .background(if (isDarkMode) Color(0xDD0F172A) else Color(0xF0F8FAFC))
             .padding(ScreenPadding)
     ) {
-        ScreenHeader(monthTitle, titleColor, isDarkMode, onClose)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                MonthArrow("◀", focusedDay == 0, isDarkMode, titleColor) { onChangeMonth(-1) }
+                Text(
+                    text = monthTitle,
+                    color = titleColor,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.Light,
+                    modifier = Modifier.widthIn(min = 260.dp),
+                    textAlign = TextAlign.Center
+                )
+                MonthArrow("▶", focusedDay == -1, isDarkMode, titleColor) { onChangeMonth(1) }
+            }
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50.dp))
+                    .background(if (isDarkMode) Color(0x22FFFFFF) else Color(0x15000000))
+                    .border(1.dp, if (isDarkMode) Color(0x44FFFFFF) else Color(0x22000000), RoundedCornerShape(50.dp))
+                    .clickable { onClose() }
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+            ) {
+                Text(text = "✕ Volver", color = titleColor, fontWeight = FontWeight.Medium)
+            }
+        }
 
         Spacer(modifier = Modifier.height(8.dp))
 

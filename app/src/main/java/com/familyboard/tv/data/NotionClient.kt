@@ -34,6 +34,7 @@ object NotionClient {
     private const val DB_TODO = "4122de7c-053e-8034-8f3f-d309d27c582a"
     private const val DB_SHOPPING = "4122de7c-053e-8068-95f6-cebbba0eb495"
 
+    private const val REPEAT_PROPERTY = "Repetir cada año"
     private const val SEVEN_DAYS_MS = 7L * 24L * 60L * 60L * 1000L
     private const val MAX_PAGES = 5
 
@@ -100,11 +101,22 @@ object NotionClient {
         }
     }
 
-    private fun fetchOptions(token: String) = NotionOptions(
-        who = selectOptions(databaseProperties(DB_TODO, token), "Quién"),
-        groceryTypes = selectOptions(databaseProperties(DB_SHOPPING, token), "Type"),
-        eventTypes = selectOptions(databaseProperties(DB_CALENDAR, token), "Type")
-    )
+    private fun fetchOptions(token: String): NotionOptions {
+        val calendarProps = databaseProperties(DB_CALENDAR, token)
+        if (!calendarProps.has(REPEAT_PROPERTY)) addRepeatProperty(token)
+        return NotionOptions(
+            who = selectOptions(databaseProperties(DB_TODO, token), "Quién"),
+            groceryTypes = selectOptions(databaseProperties(DB_SHOPPING, token), "Type"),
+            eventTypes = selectOptions(calendarProps, "Type")
+        )
+    }
+
+    private fun addRepeatProperty(token: String) {
+        val body = JSONObject()
+            .put("properties", JSONObject().put(REPEAT_PROPERTY, JSONObject().put("checkbox", JSONObject())))
+            .toString().toRequestBody(JSON)
+        client.newCall(request("$NOTION_BASE/databases/$DB_CALENDAR", token).patch(body).build()).execute().close()
+    }
 
     private fun selectName(props: JSONObject, name: String): String =
         props.optJSONObject(name)?.optJSONObject("select")?.optString("name", "") ?: ""
@@ -122,7 +134,8 @@ object NotionClient {
             val dateStart = props.optJSONObject("Date")?.optJSONObject("date")?.optString("start", "") ?: ""
             val day = dateStart.take(10).split("-").getOrNull(2)?.toIntOrNull() ?: 1
             val type = selectName(props, "Type")
-            if (title.isNotEmpty()) out.add(CalendarEvent(item.optString("id"), title, dateStart.take(10), day, type))
+            val repeats = props.optJSONObject(REPEAT_PROPERTY)?.optBoolean("checkbox", false) ?: false
+            if (title.isNotEmpty()) out.add(CalendarEvent(item.optString("id"), title, dateStart.take(10), day, type, repeats))
         }
         return out
     }
@@ -197,10 +210,11 @@ object NotionClient {
         createPage(DB_SHOPPING, props, token)
     }
 
-    suspend fun createCalendarEvent(text: String, date: String, type: String?, token: String): String? = withContext(Dispatchers.IO) {
+    suspend fun createCalendarEvent(text: String, date: String, type: String?, repeatsYearly: Boolean, token: String): String? = withContext(Dispatchers.IO) {
         val props = JSONObject()
             .put("Name", titleProperty(text))
             .put("Date", JSONObject().put("date", JSONObject().put("start", date)))
+            .put(REPEAT_PROPERTY, JSONObject().put("checkbox", repeatsYearly))
         if (!type.isNullOrBlank()) props.put("Type", selectProperty(type))
         createPage(DB_CALENDAR, props, token)
     }
@@ -213,7 +227,14 @@ object NotionClient {
         patchPage(pageId, JSONObject().put("Name", titleProperty(text)).put("Type", selectProperty(type)), token)
     }
 
-    suspend fun updateCalendarEvent(pageId: String, text: String, type: String?, token: String): Boolean = withContext(Dispatchers.IO) {
-        patchPage(pageId, JSONObject().put("Name", titleProperty(text)).put("Type", selectProperty(type)), token)
+    suspend fun updateCalendarEvent(pageId: String, text: String, type: String?, repeatsYearly: Boolean, token: String): Boolean = withContext(Dispatchers.IO) {
+        patchPage(
+            pageId,
+            JSONObject()
+                .put("Name", titleProperty(text))
+                .put("Type", selectProperty(type))
+                .put(REPEAT_PROPERTY, JSONObject().put("checkbox", repeatsYearly)),
+            token
+        )
     }
 }
