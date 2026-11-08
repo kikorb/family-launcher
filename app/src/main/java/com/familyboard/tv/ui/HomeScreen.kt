@@ -770,9 +770,7 @@ fun RefinedTopCalendarSneak(
             val dayName = if (offset == 0) "HOY" else sdfDayName.format(dayCal.time).uppercase().take(3)
 
             // Match real events from Notion for this date or dayOfMonth
-            val matchingEvents = events.filter { ev ->
-                ev.date == dateStr || (ev.dayOfMonth == dayNum && (ev.date.isEmpty() || ev.date.startsWith(dateStr.take(7))))
-            }
+            val matchingEvents = events.filter { it.occursOn(dateStr) }
 
             DayPillInfo(
                 dayLabel = dayName,
@@ -1514,7 +1512,7 @@ fun MonthCalendarScreen(
                             continue
                         }
                         val dateStr = "%04d-%02d-%02d".format(now.get(Calendar.YEAR), now.get(Calendar.MONTH) + 1, day)
-                        val dayEvents = events.filter { it.date == dateStr }
+                        val dayEvents = events.filter { it.occursOn(dateStr) }
                         val isFocused = day == focusedDay
                         val isToday = day == todayNum
 

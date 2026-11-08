@@ -107,3 +107,19 @@ object WallpaperCatalog {
             .ifEmpty { ALL_WALLPAPERS.take(1) }
     }
 }
+
+fun CalendarEvent.repeatsYearly(): Boolean = type.contains("cumple", ignoreCase = true)
+
+private fun isLeapYear(year: Int) = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+
+fun CalendarEvent.occursOn(dateStr: String): Boolean {
+    if (date == dateStr) return true
+    if (!repeatsYearly() || date.length < 10 || dateStr.length < 10) return false
+    val firstYear = date.substring(0, 4).toIntOrNull() ?: return false
+    val year = dateStr.substring(0, 4).toIntOrNull() ?: return false
+    if (year < firstYear) return false
+    val monthDay = date.substring(5, 10)
+    val targetMonthDay = dateStr.substring(5, 10)
+    return monthDay == targetMonthDay ||
+        (monthDay == "02-29" && targetMonthDay == "02-28" && !isLeapYear(year))
+}

@@ -300,7 +300,7 @@ class MainActivity : ComponentActivity() {
 
     private fun calendarChoiceEvents(): List<CalendarEvent> {
         val date = calendarChoiceDateState.value ?: return emptyList()
-        return eventsListState.filter { it.date == date && !it.id.startsWith("local_") }
+        return eventsListState.filter { it.occursOn(date) && !it.id.startsWith("local_") }
     }
 
     private fun openCalendarChoice(dateStr: String) {
