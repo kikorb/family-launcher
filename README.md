@@ -65,3 +65,7 @@ The Fedora 37, 42 and 43 default wallpapers are bundled (Fedora Project artwork,
 
 - The weather location is hardcoded in `WeatherClient.kt` (Open-Meteo, no key needed).
 - Back on the home screen is intentionally swallowed so the launcher never drops to another app.
+
+## License
+
+The code is released under the [MIT License](LICENSE). The bundled Fedora wallpapers are Fedora Project artwork under CC BY-SA 4.0 and are not covered by the MIT license.
