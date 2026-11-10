@@ -16,7 +16,9 @@ data class FamilyData(
     val events: List<CalendarEvent>?,
     val todos: List<FamilyTask>?,
     val groceries: List<GroceryItem>?,
-    val options: NotionOptions?
+    val options: NotionOptions?,
+    val movies: List<WatchItem>?,
+    val shows: List<WatchItem>?
 )
 
 object NotionClient {
@@ -33,6 +35,8 @@ object NotionClient {
     private const val DB_CALENDAR = "4122de7c-053e-80f6-bff7-ce0192a61e40"
     private const val DB_TODO = "4122de7c-053e-8034-8f3f-d309d27c582a"
     private const val DB_SHOPPING = "4122de7c-053e-8068-95f6-cebbba0eb495"
+    const val DB_MOVIES = "4142de7c-053e-8193-9678-c32f5eba8005"
+    const val DB_SHOWS = "4142de7c-053e-81c5-8dd3-dc00f4769c5d"
 
     private const val REPEAT_PROPERTY = "Repetir cada año"
     private const val SEVEN_DAYS_MS = 7L * 24L * 60L * 60L * 1000L
@@ -43,7 +47,9 @@ object NotionClient {
             events = runCatching { fetchCalendar(token) }.onFailure { Log.w(TAG, "calendar sync failed", it) }.getOrNull(),
             todos = runCatching { fetchTodos(token) }.onFailure { Log.w(TAG, "todos sync failed", it) }.getOrNull(),
             groceries = runCatching { fetchGroceries(token) }.onFailure { Log.w(TAG, "groceries sync failed", it) }.getOrNull(),
-            options = runCatching { fetchOptions(token) }.onFailure { Log.w(TAG, "options sync failed", it) }.getOrNull()
+            options = runCatching { fetchOptions(token) }.onFailure { Log.w(TAG, "options sync failed", it) }.getOrNull(),
+            movies = runCatching { fetchWatch(DB_MOVIES, token) }.onFailure { Log.w(TAG, "movies sync failed", it) }.getOrNull(),
+            shows = runCatching { fetchWatch(DB_SHOWS, token) }.onFailure { Log.w(TAG, "shows sync failed", it) }.getOrNull()
         )
     }
 
@@ -107,7 +113,8 @@ object NotionClient {
         return NotionOptions(
             who = selectOptions(databaseProperties(DB_TODO, token), "Quién"),
             groceryTypes = selectOptions(databaseProperties(DB_SHOPPING, token), "Type"),
-            eventTypes = selectOptions(calendarProps, "Type")
+            eventTypes = selectOptions(calendarProps, "Type"),
+            watchWho = selectOptions(databaseProperties(DB_MOVIES, token), "Quién")
         )
     }
 
@@ -125,6 +132,77 @@ object NotionClient {
         "select",
         if (name.isNullOrBlank()) JSONObject.NULL else JSONObject().put("name", name)
     )
+
+    private fun numberOf(props: JSONObject, name: String): Double? {
+        val v = props.optJSONObject(name) ?: return null
+        return if (v.isNull("number")) null else v.optDouble("number")
+    }
+
+    private fun fetchWatch(dbId: String, token: String): List<WatchItem> {
+        val out = mutableListOf<WatchItem>()
+        for (item in queryAll(dbId, token)) {
+            val props = item.optJSONObject("properties") ?: continue
+            val title = titleOf(props, "Name")
+            if (title.isEmpty()) continue
+            val watched = props.optJSONObject("Visto")?.optBoolean("checkbox", false) ?: false
+            val lastEdited = parseIsoTimestamp(item.optString("last_edited_time"))
+            val overviewArr = props.optJSONObject("Sinopsis")?.optJSONArray("rich_text")
+            val overview = StringBuilder()
+            if (overviewArr != null) for (i in 0 until overviewArr.length()) overview.append(overviewArr.getJSONObject(i).optString("plain_text", ""))
+            out.add(
+                WatchItem(
+                    id = item.optString("id"),
+                    title = title,
+                    year = numberOf(props, "Año")?.toInt(),
+                    posterUrl = props.optJSONObject("Póster")?.let { if (it.isNull("url")) "" else it.optString("url", "") } ?: "",
+                    rating = numberOf(props, "Nota"),
+                    overview = overview.toString(),
+                    who = selectName(props, "Quién"),
+                    watched = watched,
+                    watchedAt = if (watched) lastEdited else null,
+                    tmdbId = numberOf(props, "TMDB ID")?.toLong(),
+                    createdAt = parseIsoTimestamp(item.optString("created_time"))
+                )
+            )
+        }
+        return out.filter { !it.watched || it.watchedAt == null || System.currentTimeMillis() - it.watchedAt < SEVEN_DAYS_MS }
+            .sortedWith(compareBy<WatchItem> { it.watched }.thenByDescending { it.createdAt })
+    }
+
+    private fun watchProperties(result: TmdbResult, who: String?): JSONObject {
+        val props = JSONObject()
+            .put("Name", titleProperty(result.title))
+            .put("Quién", selectProperty(who))
+            .put("TMDB ID", JSONObject().put("number", if (result.id == 0L) JSONObject.NULL else result.id))
+            .put("Año", JSONObject().put("number", result.year ?: JSONObject.NULL))
+            .put("Nota", JSONObject().put("number", result.rating?.let { Math.round(it * 10) / 10.0 } ?: JSONObject.NULL))
+            .put("Póster", JSONObject().put("url", result.posterUrl.ifEmpty { JSONObject.NULL }))
+            .put("Enlace", JSONObject().put("url", if (result.id == 0L) JSONObject.NULL else result.link))
+            .put(
+                "Sinopsis",
+                JSONObject().put(
+                    "rich_text",
+                    org.json.JSONArray().put(JSONObject().put("text", JSONObject().put("content", result.overview.take(1900))))
+                )
+            )
+        return props
+    }
+
+    suspend fun createWatch(dbId: String, result: TmdbResult, who: String?, token: String): String? = withContext(Dispatchers.IO) {
+        createPage(dbId, watchProperties(result, who).put("Visto", JSONObject().put("checkbox", false)), token)
+    }
+
+    suspend fun updateWatch(pageId: String, result: TmdbResult, who: String?, token: String): Boolean = withContext(Dispatchers.IO) {
+        patchPage(pageId, watchProperties(result, who), token)
+    }
+
+    suspend fun updateWatchWho(pageId: String, who: String?, token: String): Boolean = withContext(Dispatchers.IO) {
+        patchPage(pageId, JSONObject().put("Quién", selectProperty(who)), token)
+    }
+
+    suspend fun updateWatched(pageId: String, watched: Boolean, token: String): Boolean = withContext(Dispatchers.IO) {
+        patchPage(pageId, JSONObject().put("Visto", JSONObject().put("checkbox", watched)), token)
+    }
 
     private fun fetchCalendar(token: String): List<CalendarEvent> {
         val out = mutableListOf<CalendarEvent>()

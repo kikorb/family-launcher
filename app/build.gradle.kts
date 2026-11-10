@@ -12,11 +12,12 @@ android {
         applicationId = "com.familyboard.tv"
         minSdk = 28
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
 
         val notionToken = System.getenv("PERSONAL_NOTION").orEmpty()
         buildConfigField("String", "PERSONAL_NOTION_TOKEN", "\"$notionToken\"")
+        buildConfigField("String", "TMDB_API_KEY", "\"${System.getenv("TMDB_API_KEY").orEmpty()}\"")
     }
 
     signingConfigs {
@@ -85,6 +86,12 @@ tasks.named("preBuild") {
             throw GradleException(
                 "PERSONAL_NOTION is not set. Export your Notion integration token before building, " +
                     "for example: export PERSONAL_NOTION=ntn_xxx (see README)."
+            )
+        }
+        if (System.getenv("TMDB_API_KEY").isNullOrBlank()) {
+            throw GradleException(
+                "TMDB_API_KEY is not set. Create a free key at themoviedb.org/settings/api and " +
+                    "export it before building: export TMDB_API_KEY=xxx (see README)."
             )
         }
     }
