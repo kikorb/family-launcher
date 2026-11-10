@@ -7,7 +7,8 @@ data class CalendarEvent(
     val title: String,
     val date: String,
     val dayOfMonth: Int,
-    val type: String // "Cumpleaños", "Cole", "Familia", "Salud"
+    val type: String,
+    val repeatsYearly: Boolean = false
 )
 
 data class FamilyTask(
@@ -95,7 +96,8 @@ data class EntryForm(
     val editId: String? = null,
     val initialText: String = "",
     val initialOption: String = "",
-    val dateStr: String? = null
+    val dateStr: String? = null,
+    val initialRepeat: Boolean = false
 )
 
 object WallpaperCatalog {
@@ -106,4 +108,18 @@ object WallpaperCatalog {
         items = ALL_WALLPAPERS.filter { it.assetPath.substringAfterLast('/') in bundledAssets }
             .ifEmpty { ALL_WALLPAPERS.take(1) }
     }
+}
+
+private fun isLeapYear(year: Int) = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+
+fun CalendarEvent.occursOn(dateStr: String): Boolean {
+    if (date == dateStr) return true
+    if (!repeatsYearly || date.length < 10 || dateStr.length < 10) return false
+    val firstYear = date.substring(0, 4).toIntOrNull() ?: return false
+    val year = dateStr.substring(0, 4).toIntOrNull() ?: return false
+    if (year < firstYear) return false
+    val monthDay = date.substring(5, 10)
+    val targetMonthDay = dateStr.substring(5, 10)
+    return monthDay == targetMonthDay ||
+        (monthDay == "02-29" && targetMonthDay == "02-28" && !isLeapYear(year))
 }

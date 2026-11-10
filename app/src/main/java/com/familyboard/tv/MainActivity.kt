@@ -47,6 +47,7 @@ class MainActivity : ComponentActivity() {
     private val settingsIndexState = mutableIntStateOf(0)
     private val appsGridIndexState = mutableIntStateOf(0)
     private val monthDayIndexState = mutableIntStateOf(Calendar.getInstance().get(Calendar.DAY_OF_MONTH))
+    private val monthOffsetState = mutableIntStateOf(0)
     private val listColumnState = mutableIntStateOf(0)
     private val taskIndexState = mutableIntStateOf(0)
     private val groceryIndexState = mutableIntStateOf(0)
@@ -144,6 +145,7 @@ class MainActivity : ComponentActivity() {
                 onActiveSectionChange = {
                     activeSectionState.value = it
                     appsEditModeState.value = false
+                    monthOffsetState.intValue = 0
                     if (it == ActiveSection.CENTER) centerFocusState.value = CenterFocusArea.DOCK
                 },
                 centerFocus = centerFocusState.value,
@@ -156,6 +158,8 @@ class MainActivity : ComponentActivity() {
                 onAppsGridIndexChange = { appsGridIndexState.intValue = it },
                 monthDayFocusedIndex = monthDayIndexState.intValue,
                 onMonthDayIndexChange = { monthDayIndexState.intValue = it },
+                monthOffset = monthOffsetState.intValue,
+                onChangeMonth = { changeMonth(it, 1) },
                 listFocusedColumn = listColumnState.intValue,
                 onListColumnChange = { listColumnState.intValue = it },
                 taskFocusedIndex = taskIndexState.intValue,
@@ -195,7 +199,7 @@ class MainActivity : ComponentActivity() {
                 taskWhoOptions = optionsState.value.who,
                 groceryTypeOptions = optionsState.value.groceryTypes,
                 eventTypeOptions = optionsState.value.eventTypes,
-                onSubmitEntry = { text, option -> submitEntry(text, option) },
+                onSubmitEntry = { text, option, repeat -> submitEntry(text, option, repeat) },
                 onCancelEntry = { entryFormState.value = null }
             )
         }
@@ -245,6 +249,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun resetToHome() {
+        monthOffsetState.intValue = 0
         appsEditModeState.value = false
         tasksEditModeState.value = false
         groceriesEditModeState.value = false
@@ -300,7 +305,7 @@ class MainActivity : ComponentActivity() {
 
     private fun calendarChoiceEvents(): List<CalendarEvent> {
         val date = calendarChoiceDateState.value ?: return emptyList()
-        return eventsListState.filter { it.date == date && !it.id.startsWith("local_") }
+        return eventsListState.filter { it.occursOn(date) && !it.id.startsWith("local_") }
     }
 
     private fun openCalendarChoice(dateStr: String) {
@@ -316,7 +321,7 @@ class MainActivity : ComponentActivity() {
             index == 0 -> startVoice(VoiceInputMode.AddCalendarEvent(date))
             index == 1 -> entryFormState.value = EntryForm(EntryKind.EVENT, dateStr = date)
             else -> events.getOrNull(index - 2)?.let {
-                entryFormState.value = EntryForm(EntryKind.EVENT, it.id, it.title, it.type, date)
+                entryFormState.value = EntryForm(EntryKind.EVENT, it.id, it.title, it.type, date, it.repeatsYearly)
             }
         }
     }
@@ -333,7 +338,7 @@ class MainActivity : ComponentActivity() {
         entryFormState.value = EntryForm(EntryKind.GROCERY, item.id, item.text, item.category)
     }
 
-    private fun submitEntry(text: String, option: String) {
+    private fun submitEntry(text: String, option: String, repeat: Boolean) {
         val form = entryFormState.value ?: return
         entryFormState.value = null
         val token = BuildConfig.PERSONAL_NOTION_TOKEN
@@ -343,7 +348,7 @@ class MainActivity : ComponentActivity() {
                 EntryKind.GROCERY -> VoiceInputMode.AddGrocery
                 EntryKind.EVENT -> VoiceInputMode.AddCalendarEvent(form.dateStr ?: return)
             }
-            addEntry(mode, text, option)
+            addEntry(mode, text, option, repeat)
             return
         }
         when (form.kind) {
@@ -359,8 +364,8 @@ class MainActivity : ComponentActivity() {
             }
             EntryKind.EVENT -> {
                 val idx = eventsListState.indexOfFirst { it.id == form.editId }
-                if (idx >= 0) eventsListState[idx] = eventsListState[idx].copy(title = text, type = option)
-                if (token.isNotEmpty()) lifecycleScope.launch { NotionClient.updateCalendarEvent(form.editId, text, option, token) }
+                if (idx >= 0) eventsListState[idx] = eventsListState[idx].copy(title = text, type = option, repeatsYearly = repeat)
+                if (token.isNotEmpty()) lifecycleScope.launch { NotionClient.updateCalendarEvent(form.editId, text, option, repeat, token) }
             }
         }
     }
@@ -376,7 +381,7 @@ class MainActivity : ComponentActivity() {
             .apply()
     }
 
-    private fun addEntry(mode: VoiceInputMode, text: String, option: String = "") {
+    private fun addEntry(mode: VoiceInputMode, text: String, option: String = "", repeat: Boolean = false) {
         val token = BuildConfig.PERSONAL_NOTION_TOKEN
         val localId = "local_${System.nanoTime()}"
         when (mode) {
@@ -398,8 +403,8 @@ class MainActivity : ComponentActivity() {
             }
             is VoiceInputMode.AddCalendarEvent -> {
                 val day = mode.dateStr.split("-").lastOrNull()?.toIntOrNull() ?: 1
-                eventsListState.add(CalendarEvent(localId, text, mode.dateStr, day, option))
-                persistCreate(token, localId, { NotionClient.createCalendarEvent(text, mode.dateStr, option, token) }) { newId ->
+                eventsListState.add(CalendarEvent(localId, text, mode.dateStr, day, option, repeat))
+                persistCreate(token, localId, { NotionClient.createCalendarEvent(text, mode.dateStr, option, repeat, token) }) { newId ->
                     val idx = eventsListState.indexOfFirst { it.id == localId }
                     if (idx >= 0) eventsListState[idx] = eventsListState[idx].copy(id = newId)
                 }
@@ -557,6 +562,7 @@ class MainActivity : ComponentActivity() {
                 keyCode == KeyEvent.KEYCODE_DPAD_DOWN -> centerFocusState.value = CenterFocusArea.DOCK
                 keyCode == KeyEvent.KEYCODE_DPAD_UP || isSelect -> {
                     activeSectionState.value = ActiveSection.MONTH
+                    monthOffsetState.intValue = 0
                     monthDayIndexState.intValue = Calendar.getInstance().get(Calendar.DAY_OF_MONTH)
                 }
                 keyCode == KeyEvent.KEYCODE_DPAD_LEFT -> centerFocusState.value = CenterFocusArea.ARROW_LEFT
@@ -638,17 +644,46 @@ class MainActivity : ComponentActivity() {
         return true
     }
 
+    private fun displayedMonth(): Calendar = Calendar.getInstance().apply {
+        set(Calendar.DAY_OF_MONTH, 1)
+        add(Calendar.MONTH, monthOffsetState.intValue)
+    }
+
+    private fun changeMonth(delta: Int, focusDay: Int) {
+        monthOffsetState.intValue += delta
+        val daysInMonth = displayedMonth().getActualMaximum(Calendar.DAY_OF_MONTH)
+        monthDayIndexState.intValue = if (focusDay >= 1) focusDay.coerceAtMost(daysInMonth) else focusDay
+        if (focusDay == Int.MAX_VALUE) monthDayIndexState.intValue = daysInMonth
+    }
+
     private fun handleMonthKey(keyCode: Int): Boolean {
-        val cal = Calendar.getInstance()
+        val cal = displayedMonth()
         val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
         val day = monthDayIndexState.intValue
         when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_LEFT -> if (day > 1) monthDayIndexState.intValue--
-            KeyEvent.KEYCODE_DPAD_RIGHT -> if (day < daysInMonth) monthDayIndexState.intValue++
-            KeyEvent.KEYCODE_DPAD_UP -> if (day > 7) monthDayIndexState.intValue -= 7
-            KeyEvent.KEYCODE_DPAD_DOWN -> if (day + 7 <= daysInMonth) monthDayIndexState.intValue += 7
-            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER ->
-                openCalendarChoice("%04d-%02d-%02d".format(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, day))
+            KeyEvent.KEYCODE_DPAD_LEFT -> when {
+                day > 1 -> monthDayIndexState.intValue--
+                day == 1 -> changeMonth(-1, Int.MAX_VALUE)
+                day == -1 -> monthDayIndexState.intValue = 0
+            }
+            KeyEvent.KEYCODE_DPAD_RIGHT -> when {
+                day in 1 until daysInMonth -> monthDayIndexState.intValue++
+                day == daysInMonth -> changeMonth(1, 1)
+                day == 0 -> monthDayIndexState.intValue = -1
+            }
+            KeyEvent.KEYCODE_DPAD_UP -> when {
+                day > 7 -> monthDayIndexState.intValue -= 7
+                day >= 1 -> monthDayIndexState.intValue = 0
+            }
+            KeyEvent.KEYCODE_DPAD_DOWN -> when {
+                day <= 0 -> monthDayIndexState.intValue = 1
+                day + 7 <= daysInMonth -> monthDayIndexState.intValue += 7
+            }
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> when {
+                day == 0 -> changeMonth(-1, 0)
+                day == -1 -> changeMonth(1, -1)
+                else -> openCalendarChoice("%04d-%02d-%02d".format(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, day))
+            }
             else -> return false
         }
         return true
