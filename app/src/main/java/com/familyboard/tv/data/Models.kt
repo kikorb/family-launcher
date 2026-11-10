@@ -80,7 +80,7 @@ val ALL_WALLPAPERS = listOf(
     WallpaperItem("interior", "Salón Moderno / Interior", "file:///android_asset/wallpaper_interior.jpg", "Ambiente cálido y acogedor"),
     WallpaperItem("fedora37", "Fedora 37 Default", "file:///android_asset/wallpaper_fedora37.jpg", "Fondo oficial abstracto azul"),
     WallpaperItem("fedora42", "Fedora 42 Default", "file:///android_asset/wallpaper_fedora42.jpg", "Fondo oficial geométrico moderno"),
-    WallpaperItem("fedora43", "Fedora 43 Default", "file:///android_asset/wallpaper_fedora43.png", "Fondo oficial paisaje estilizado"),
+    WallpaperItem("fedora43", "Fedora 43 Default", "file:///android_asset/wallpaper_fedora43.jpg", "Fondo oficial paisaje estilizado"),
     WallpaperItem("art_room", "Estudio & Pintura", "file:///android_asset/wallpaper_art_room.jpg", "Ilustración artística cálida")
 )
 
