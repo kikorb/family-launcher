@@ -6,7 +6,10 @@ A family dashboard that replaces the Google TV home screen on a Chromecast with 
 - **Up**: month calendar. Press OK on a day to add an event by voice or keyboard, or edit existing ones.
 - **Right**: family tasks and shopping list, synced with Notion. Add by voice (🎤 Dictar) or keyboard (⌨ Añadir), pick *Quién* / *Tipo* from your Notion options, and edit existing items (✎ Editar).
 - **Down**: all apps. The ★ Favoritas button picks which 5 appear on the home dock.
-- **Left**: light/dark mode and wallpapers.
+- **Left**: films and TV shows to watch, synced with Notion. Add by voice or keyboard, pick the right match with poster, year and rating from TMDB, tag who recommended it (*Quién*), and tick it off once seen.
+- **Apps drawer → ⚙ Ajustes**: light/dark mode, wallpapers and the TV's system settings.
+
+Every list screen uses the same pattern: **✎ Editar** turns edit mode on (OK on an item opens its form), otherwise OK does the item's main action (tick, launch, add). Back leaves edit mode, then the screen.
 
 Spanish UI. Voice input uses the TV's built-in Google speech recognition (es-ES).
 
@@ -18,9 +21,12 @@ Create a Notion integration, share three databases with it, and export its token
 | --- | --- |
 | Tasks | `Qué` (title), `Quién` (select), `Status` (status: Not started / In progress / Done) |
 | Shopping | `Name` (title), `Type` (select), `Purchased` (checkbox) |
-| Calendar | `Name` (title), `Date` (date), `Type` (select) |
+| Calendar | `Name` (title), `Date` (date), `Type` (select), `Repetir cada año` (checkbox, created automatically) |
+| Films / TV shows (two databases) | `Name` (title), `Quién` (select), `Visto` (checkbox), `Año`, `Nota`, `TMDB ID` (numbers), `Póster`, `Enlace` (urls), `Sinopsis` (text) |
 
-The database IDs are constants at the top of `app/src/main/java/com/familyboard/tv/data/NotionClient.kt`. Replace them with yours. Select options are read from the databases at runtime and cached, so adding a person or a type in Notion makes it available on the TV.
+Film and show metadata comes from [TMDB](https://www.themoviedb.org/) (IMDb and FilmAffinity have no usable public API). Create a free key at themoviedb.org/settings/api.
+
+The database IDs are constants in `app/src/main/java/com/familyboard/tv/data/NotionClient.kt`. Replace them with yours. Select options are read from the databases at runtime and cached, so adding a person or a type in Notion makes it available on the TV.
 
 ## Build
 
@@ -28,10 +34,11 @@ Requires JDK 17 and the Android SDK.
 
 ```bash
 export PERSONAL_NOTION=ntn_your_integration_token
+export TMDB_API_KEY=your_tmdb_v3_api_key
 ./gradlew assembleRelease
 ```
 
-The build fails with a clear message if `PERSONAL_NOTION` is not set. The token is compiled into the APK (`BuildConfig`), so do not publish built APKs.
+The build fails with a clear message if either variable is missing. Both secrets are compiled into the APK (`BuildConfig`), so do not publish built APKs.
 
 The release build is signed with your local `~/.android/debug.keystore`, which is fine for sideloading. Use the release build, not debug: a debuggable build runs several times slower on a Chromecast.
 
@@ -55,7 +62,7 @@ scripts/tv-home.sh recover
 adb shell pm enable com.google.android.tungsten.setupwraith
 ```
 
-Wireless debugging may turn itself off after a reboot. The launcher has an *Ajustes de TV* shortcut in its settings drawer to get back to system settings.
+Wireless debugging may turn itself off after a reboot. The launcher has an *Ajustes de TV* shortcut under ⚙ Ajustes in the apps drawer to get back to system settings.
 
 ## Wallpapers
 

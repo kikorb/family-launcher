@@ -2,7 +2,6 @@ package com.familyboard.tv.ui
 
 import android.content.Context
 import android.content.Intent
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
@@ -53,6 +52,37 @@ private val DrawerSlideOut = tween<androidx.compose.ui.unit.IntOffset>(120, easi
 private val DrawerFadeIn = tween<Float>(150, easing = LinearOutSlowInEasing)
 private val DrawerFadeOut = tween<Float>(100, easing = FastOutLinearInEasing)
 
+data class WatchState(
+    val movies: List<WatchItem> = emptyList(),
+    val shows: List<WatchItem> = emptyList(),
+    val focusedColumn: Int = 0,
+    val movieIndex: Int = 0,
+    val showIndex: Int = 0,
+    val moviesEdit: Boolean = false,
+    val showsEdit: Boolean = false,
+    val whoOptions: List<String> = emptyList()
+)
+
+data class WatchActions(
+    val onToggleMovie: (Int) -> Unit = {},
+    val onToggleShow: (Int) -> Unit = {},
+    val onEditMovie: (Int) -> Unit = {},
+    val onEditShow: (Int) -> Unit = {},
+    val onToggleMoviesEdit: () -> Unit = {},
+    val onToggleShowsEdit: () -> Unit = {},
+    val onDictateMovie: () -> Unit = {},
+    val onDictateShow: () -> Unit = {},
+    val onTypeMovie: () -> Unit = {},
+    val onTypeShow: () -> Unit = {}
+)
+
+data class SearchUi(
+    val isShow: Boolean,
+    val query: String,
+    val results: List<TmdbResult>?,
+    val failed: Boolean = false
+)
+
 @Composable
 fun HomeScreen(
     installedApps: List<InstalledApp>,
@@ -73,19 +103,15 @@ fun HomeScreen(
     dockFocusedIndex: Int,
     onDockIndexChange: (Int) -> Unit,
     settingsFocusedIndex: Int,
-    onSettingsIndexChange: (Int) -> Unit,
     appsGridFocusedIndex: Int,
-    onAppsGridIndexChange: (Int) -> Unit,
     monthDayFocusedIndex: Int,
-    onMonthDayIndexChange: (Int) -> Unit,
     monthOffset: Int = 0,
     onChangeMonth: (Int) -> Unit = {},
+    calendarEditMode: Boolean = false,
+    onToggleCalendarEdit: () -> Unit = {},
     listFocusedColumn: Int,
-    onListColumnChange: (Int) -> Unit,
     taskFocusedIndex: Int,
-    onTaskIndexChange: (Int) -> Unit,
     groceryFocusedIndex: Int,
-    onGroceryIndexChange: (Int) -> Unit,
     isDarkMode: Boolean,
     onToggleDarkMode: () -> Unit,
     currentWallpaper: String,
@@ -106,6 +132,12 @@ fun HomeScreen(
     onToggleGroceriesEdit: () -> Unit = {},
     onEditTask: (Int) -> Unit = {},
     onEditGrocery: (Int) -> Unit = {},
+    watch: WatchState = WatchState(),
+    watchActions: WatchActions = WatchActions(),
+    search: SearchUi? = null,
+    searchIndex: Int = 0,
+    onSearchPick: (Int) -> Unit = {},
+    onSearchDismiss: () -> Unit = {},
     onOpenCalendarChoice: (String) -> Unit = {},
     calendarChoiceDate: String? = null,
     calendarChoiceIndex: Int = 0,
@@ -119,21 +151,15 @@ fun HomeScreen(
     onSubmitEntry: (String, String, Boolean) -> Unit = { _, _, _ -> },
     onCancelEntry: () -> Unit = {}
 ) {
-    // Intercept Back button: return to clean Wallpaper Center
-    BackHandler(enabled = activeSection != ActiveSection.CENTER) {
-        onActiveSectionChange(ActiveSection.CENTER)
-    }
-
     val primaryTextColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
-    val secondaryTextColor = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF475569)
-    val defaultArrowColor = if (isDarkMode) Color.White.copy(alpha = 0.65f) else Color(0xFF0F172A).copy(alpha = 0.75f)
+    val secondaryTextColor = if (isDarkMode) Color(0xFFCBD5E1) else Color(0xFF475569)
+    val defaultArrowColor = if (isDarkMode) Color.White.copy(alpha = 0.7f) else Color(0xFF0F172A).copy(alpha = 0.75f)
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(if (isDarkMode) Color(0xFF070B12) else Color(0xFFF1F5F9))
     ) {
-        // 1. Fullscreen Wallpaper Backdrop
         AsyncImage(
             model = currentWallpaper,
             contentDescription = null,
@@ -141,131 +167,110 @@ fun HomeScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Ambient overlay gradient for high readability
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     if (isDarkMode) {
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color(0x66000000),
-                                Color(0x22000000),
-                                Color(0x77000000)
-                            )
-                        )
+                        Brush.verticalGradient(listOf(Color(0x66000000), Color(0x22000000), Color(0x77000000)))
                     } else {
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color(0x44FFFFFF),
-                                Color(0x11FFFFFF),
-                                Color(0x55FFFFFF)
-                            )
-                        )
+                        Brush.verticalGradient(listOf(Color(0x44FFFFFF), Color(0x11FFFFFF), Color(0x55FFFFFF)))
                     }
                 )
         )
 
-        // 2. CENTER LANDING SCREEN WITH 4 REFINED SNEAK EDGES
         if (activeSection == ActiveSection.CENTER) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 48.dp, vertical = 28.dp),
+                    .padding(start = 64.dp, end = 64.dp, top = 10.dp, bottom = 10.dp),
                 verticalArrangement = Arrangement.SpaceBetween,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Top Edge Sneak: Weather + Rolling 7-Day Bubbles (Today + 6 Days) + Arrow ▲
-                RefinedTopCalendarSneak(
-                    weather = weather,
-                    events = events,
-                    isDarkMode = isDarkMode,
-                    isArrowFocused = centerFocus == CenterFocusArea.ARROW_UP,
-                    defaultArrowColor = defaultArrowColor,
-                    onOpenMonth = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    EdgeArrow("▲", centerFocus == CenterFocusArea.ARROW_UP, defaultArrowColor) {
                         onActiveSectionChange(ActiveSection.MONTH)
                     }
-                )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    WeekStrip(weather = weather, events = events, isDarkMode = isDarkMode)
+                }
 
-                // Clean Center Area: Spacious Wallpaper with Ambient Clock
-                AmbientClockHero(
-                    textColor = primaryTextColor,
-                    dateColor = secondaryTextColor
-                )
+                AmbientClockHero(textColor = primaryTextColor)
 
-                // Bottom Edge Sneak: Centered ▼ Arrow above + 5 Floating App Circles (with real built-in icons)
-                RefinedFavoritesDock(
-                    apps = dockApps,
-                    isDockFocused = centerFocus == CenterFocusArea.DOCK,
-                    focusedIndex = dockFocusedIndex,
-                    isArrowFocused = centerFocus == CenterFocusArea.ARROW_DOWN,
-                    defaultArrowColor = defaultArrowColor,
-                    primaryTextColor = primaryTextColor,
-                    onSelectIndex = {
-                        onCenterFocusChange(CenterFocusArea.DOCK)
-                        onDockIndexChange(it)
-                    },
-                    onLaunch = onLaunchApp,
-                    onOpenAllApps = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    RefinedFavoritesDock(
+                        apps = dockApps,
+                        isDockFocused = centerFocus == CenterFocusArea.DOCK,
+                        focusedIndex = dockFocusedIndex,
+                        primaryTextColor = primaryTextColor,
+                        onSelectIndex = {
+                            onCenterFocusChange(CenterFocusArea.DOCK)
+                            onDockIndexChange(it)
+                        },
+                        onLaunch = onLaunchApp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    EdgeArrow("▼", centerFocus == CenterFocusArea.ARROW_DOWN, defaultArrowColor) {
                         onActiveSectionChange(ActiveSection.APPS)
                     }
-                )
+                }
             }
 
-            // Left Edge Sneak: Settings & Wallpaper Menu (◀)
-            Box(
+            Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(start = 28.dp),
-                contentAlignment = Alignment.CenterStart
+                    .padding(start = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                RefinedLeftSettingsSneak(
-                    isDarkMode = isDarkMode,
-                    isArrowFocused = centerFocus == CenterFocusArea.ARROW_LEFT,
-                    defaultArrowColor = defaultArrowColor,
-                    onOpenSettings = {
-                        onActiveSectionChange(ActiveSection.SETTINGS)
-                    }
-                )
+                EdgeArrow("◀", centerFocus == CenterFocusArea.ARROW_LEFT, defaultArrowColor) {
+                    onActiveSectionChange(ActiveSection.WATCH)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CountBubble("🎬", watch.movies.visibleWatch().count { !it.watched }, isDarkMode)
+                    CountBubble("📺", watch.shows.visibleWatch().count { !it.watched }, isDarkMode)
+                }
             }
 
-            // Right Edge Sneak: Family Tasks & Grocery Lists (▶)
-            Box(
+            Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(end = 28.dp),
-                contentAlignment = Alignment.CenterEnd
+                    .padding(end = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                RefinedRightListsSneak(
-                    todoCount = todos.count { !it.completed },
-                    groceryCount = groceries.count { !it.completed },
-                    isDarkMode = isDarkMode,
-                    isArrowFocused = centerFocus == CenterFocusArea.ARROW_RIGHT,
-                    defaultArrowColor = defaultArrowColor,
-                    onOpenLists = {
-                        onActiveSectionChange(ActiveSection.LISTS)
-                    }
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CountBubble("📋", todos.count { !it.completed }, isDarkMode)
+                    CountBubble("🛒", groceries.count { !it.completed }, isDarkMode)
+                }
+                EdgeArrow("▶", centerFocus == CenterFocusArea.ARROW_RIGHT, defaultArrowColor) {
+                    onActiveSectionChange(ActiveSection.LISTS)
+                }
             }
         }
 
-        // 3. LOCKED SECTION: LEFT (◀) - Settings, Theme & Wallpaper Menu
         AnimatedVisibility(
-            visible = activeSection == ActiveSection.SETTINGS,
+            visible = activeSection == ActiveSection.WATCH,
             enter = slideInHorizontally(DrawerSlideIn) { -it / 4 } + fadeIn(DrawerFadeIn),
             exit = slideOutHorizontally(DrawerSlideOut) { -it / 4 } + fadeOut(DrawerFadeOut)
+        ) {
+            WatchScreen(watch = watch, actions = watchActions, isDarkMode = isDarkMode)
+        }
+
+        AnimatedVisibility(
+            visible = activeSection == ActiveSection.SETTINGS,
+            enter = slideInVertically(DrawerSlideIn) { it / 4 } + fadeIn(DrawerFadeIn),
+            exit = slideOutVertically(DrawerSlideOut) { it / 4 } + fadeOut(DrawerFadeOut)
         ) {
             SettingsWallpaperScreen(
                 isDarkMode = isDarkMode,
                 focusedIndex = settingsFocusedIndex,
                 currentWallpaper = currentWallpaper,
                 onToggleDarkMode = onToggleDarkMode,
-                onSelectWallpaper = onSelectWallpaper,
-                onClose = { onActiveSectionChange(ActiveSection.CENTER) }
+                onSelectWallpaper = onSelectWallpaper
             )
         }
 
-        // 4. LOCKED SECTION: UP (▲) - Full Month Clean Calendar (Monday to Sunday)
         AnimatedVisibility(
             visible = activeSection == ActiveSection.MONTH,
             enter = slideInVertically(DrawerSlideIn) { -it / 4 } + fadeIn(DrawerFadeIn),
@@ -276,13 +281,13 @@ fun HomeScreen(
                 isDarkMode = isDarkMode,
                 focusedDay = monthDayFocusedIndex,
                 monthOffset = monthOffset,
+                editMode = calendarEditMode,
                 onChangeMonth = onChangeMonth,
-                onOpenCalendarChoice = onOpenCalendarChoice,
-                onClose = { onActiveSectionChange(ActiveSection.CENTER) }
+                onToggleEditMode = onToggleCalendarEdit,
+                onOpenCalendarChoice = onOpenCalendarChoice
             )
         }
 
-        // 5. LOCKED SECTION: RIGHT (▶) - Family Tasks & Grocery Dual Board
         AnimatedVisibility(
             visible = activeSection == ActiveSection.LISTS,
             enter = slideInHorizontally(DrawerSlideIn) { it / 4 } + fadeIn(DrawerFadeIn),
@@ -306,12 +311,10 @@ fun HomeScreen(
                 onToggleTasksEdit = onToggleTasksEdit,
                 onToggleGroceriesEdit = onToggleGroceriesEdit,
                 onEditTask = onEditTask,
-                onEditGrocery = onEditGrocery,
-                onClose = { onActiveSectionChange(ActiveSection.CENTER) }
+                onEditGrocery = onEditGrocery
             )
         }
 
-        // 6. LOCKED SECTION: DOWN (▼) - All Applications Drawer (with real built-in icons)
         AnimatedVisibility(
             visible = activeSection == ActiveSection.APPS,
             enter = slideInVertically(DrawerSlideIn) { it / 4 } + fadeIn(DrawerFadeIn),
@@ -326,12 +329,11 @@ fun HomeScreen(
                 message = favoritesMessage,
                 onToggleEditMode = onToggleAppsEditMode,
                 onToggleFavorite = onToggleFavorite,
-                onLaunch = onLaunchApp,
-                onClose = { onActiveSectionChange(ActiveSection.CENTER) }
+                onOpenSettings = { onActiveSectionChange(ActiveSection.SETTINGS) },
+                onLaunch = onLaunchApp
             )
         }
 
-        // 7. VOICE LISTENING AMBIENT DIALOG OVERLAY
         if (voiceListening) {
             Box(
                 modifier = Modifier
@@ -354,7 +356,9 @@ fun HomeScreen(
                         text = when (voiceInputMode) {
                             is VoiceInputMode.AddTask -> "Dicta una nueva tarea"
                             is VoiceInputMode.AddGrocery -> "Dicta un artículo para la compra"
-                            is VoiceInputMode.AddCalendarEvent -> "Dicta el evento para ${(voiceInputMode as VoiceInputMode.AddCalendarEvent).dateStr}"
+                            is VoiceInputMode.AddMovie -> "Dicta el título de la película"
+                            is VoiceInputMode.AddShow -> "Dicta el título de la serie"
+                            is VoiceInputMode.AddCalendarEvent -> "Dicta el evento para ${voiceInputMode.dateStr}"
                             else -> "Escuchando voz..."
                         },
                         fontSize = 22.sp,
@@ -374,6 +378,7 @@ fun HomeScreen(
             CalendarChoiceOverlay(
                 dateStr = calendarChoiceDate,
                 events = calendarChoiceEvents,
+                editMode = calendarEditMode,
                 selectedIndex = calendarChoiceIndex,
                 isDarkMode = isDarkMode,
                 onChoose = onCalendarChoose,
@@ -388,10 +393,21 @@ fun HomeScreen(
                     EntryKind.TASK -> taskWhoOptions
                     EntryKind.GROCERY -> groceryTypeOptions
                     EntryKind.EVENT -> eventTypeOptions
+                    EntryKind.MOVIE, EntryKind.SHOW -> watch.whoOptions
                 },
                 isDarkMode = isDarkMode,
                 onSubmit = onSubmitEntry,
                 onCancel = onCancelEntry
+            )
+        }
+
+        if (search != null) {
+            SearchOverlay(
+                ui = search,
+                selectedIndex = searchIndex,
+                isDarkMode = isDarkMode,
+                onPick = onSearchPick,
+                onDismiss = onSearchDismiss
             )
         }
     }
@@ -439,6 +455,7 @@ private fun OverlayButton(
 private fun CalendarChoiceOverlay(
     dateStr: String,
     events: List<CalendarEvent>,
+    editMode: Boolean,
     selectedIndex: Int,
     isDarkMode: Boolean,
     onChoose: (Int) -> Unit,
@@ -462,14 +479,14 @@ private fun CalendarChoiceOverlay(
                 .border(1.5.dp, FocusCyan, RoundedCornerShape(24.dp))
                 .padding(horizontal = 48.dp, vertical = 28.dp)
         ) {
-            Text(text = "Nuevo evento", fontSize = 14.sp, color = subtextColor)
+            Text(text = if (editMode) "Editar evento" else "Nuevo evento", fontSize = 14.sp, color = subtextColor)
             Text(text = formatDateEs(dateStr), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = titleColor)
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                OverlayButton("🎤 Dictar", selectedIndex == 0, isDarkMode, { onChoose(0) })
-                OverlayButton("⌨ Escribir", selectedIndex == 1, isDarkMode, { onChoose(1) })
-            }
-            if (events.isNotEmpty()) {
-                Text(text = "Editar eventos de este día", fontSize = 13.sp, color = subtextColor)
+            if (!editMode) {
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    OverlayButton("🎤 Dictar", selectedIndex == 0, isDarkMode, { onChoose(0) })
+                    OverlayButton("⌨ Escribir", selectedIndex == 1, isDarkMode, { onChoose(1) })
+                }
+            } else {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     events.forEachIndexed { i, ev ->
                         OverlayButton(
@@ -517,8 +534,11 @@ private fun EntryFormOverlay(
     val aboveButtons = if (hasToggle) toggleRequester else (chipRequesters[selected] ?: focusRequester)
 
     val isEdit = form.editId != null
-    val optionLabel = if (form.kind == EntryKind.TASK) "Quién" else "Tipo"
+    val isWatch = form.kind == EntryKind.MOVIE || form.kind == EntryKind.SHOW
+    val optionLabel = if (form.kind == EntryKind.TASK || isWatch) "Quién" else "Tipo"
     val heading = when (form.kind) {
+        EntryKind.MOVIE -> if (isEdit) "Editar película" else "Nueva película"
+        EntryKind.SHOW -> if (isEdit) "Editar serie" else "Nueva serie"
         EntryKind.TASK -> if (isEdit) "Editar tarea" else "Nueva tarea familiar"
         EntryKind.GROCERY -> if (isEdit) "Editar artículo" else "Nuevo artículo de la compra"
         EntryKind.EVENT -> (if (isEdit) "Editar evento: " else "Nuevo evento: ") + formatDateEs(form.dateStr ?: "")
@@ -684,7 +704,11 @@ private fun EntryFormOverlay(
 
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 OverlayButton(
-                    label = if (isEdit) "✓ Guardar" else "✓ Añadir",
+                    label = when {
+                        isWatch && (!isEdit || text.trim() != form.initialText.trim()) -> "🔎 Buscar"
+                        isEdit -> "✓ Guardar"
+                        else -> "✓ Añadir"
+                    },
                     focused = addFocused,
                     isDarkMode = isDarkMode,
                     onClick = { submit() },
@@ -719,115 +743,107 @@ private fun EntryFormOverlay(
 }
 
 // -----------------------------------------------------------------------------
-// REFINED LEFT SNEAK: 2 BUBBLES (🎨 & 🌓) + ARROW ◀
+// HOME PIECES: WEEK STRIP, DOCK, EDGE ARROWS, COUNT BUBBLES, CLOCK
 // -----------------------------------------------------------------------------
 
+fun eventAccent(type: String): Color = when {
+    type.contains("cumple", ignoreCase = true) -> Color(0xFFF43F5E)
+    type.contains("fiesta", ignoreCase = true) -> Color(0xFF8B5CF6)
+    type.contains("médico", ignoreCase = true) || type.contains("medico", ignoreCase = true) -> Color(0xFF14B8A6)
+    type.contains("excursi", ignoreCase = true) -> Color(0xFF10B981)
+    type.contains("tarea", ignoreCase = true) -> Color(0xFFF59E0B)
+    else -> Color(0xFF0284C7)
+}
+
+private fun eventEmoji(type: String): String = when {
+    type.contains("cumple", ignoreCase = true) -> "🎂 "
+    type.contains("fiesta", ignoreCase = true) -> "🎉 "
+    type.contains("médico", ignoreCase = true) || type.contains("medico", ignoreCase = true) -> "🩺 "
+    type.contains("excursi", ignoreCase = true) -> "🚌 "
+    else -> ""
+}
+
 @Composable
-fun RefinedLeftSettingsSneak(
-    isDarkMode: Boolean,
-    isArrowFocused: Boolean,
-    defaultArrowColor: Color,
-    onOpenSettings: () -> Unit
-) {
-    Row(
+private fun EventChip(event: CalendarEvent, isDarkMode: Boolean, compact: Boolean = false) {
+    val accent = eventAccent(event.type)
+    val shape = RoundedCornerShape(if (compact) 6.dp else 8.dp)
+    Box(
         modifier = Modifier
-            .clickable { onOpenSettings() },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+            .fillMaxWidth()
+            .clip(shape)
+            .background(accent.copy(alpha = if (isDarkMode) 0.40f else 0.26f))
+            .border(1.dp, accent.copy(alpha = 0.85f), shape)
+            .padding(horizontal = 6.dp, vertical = if (compact) 1.dp else 3.dp)
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            // Theme / Settings Bubble
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50.dp))
-                    .background(if (isDarkMode) Color(0x66475569) else Color(0xCCFFFFFF))
-                    .border(
-                        width = 1.dp,
-                        color = if (isDarkMode) Color(0x44FFFFFF) else Color(0x18000000),
-                        shape = RoundedCornerShape(50.dp)
-                    )
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(text = if (isDarkMode) "🌙" else "☀️", fontSize = 14.sp)
-                Text(
-                    text = if (isDarkMode) "Oscuro" else "Claro",
-                    color = if (isDarkMode) Color.White else Color(0xFF0F172A),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            // Wallpaper Bubble
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50.dp))
-                    .background(if (isDarkMode) Color(0x667C3AED) else Color(0xCCFFFFFF))
-                    .border(
-                        width = 1.dp,
-                        color = if (isDarkMode) Color(0x44A78BFA) else Color(0x18000000),
-                        shape = RoundedCornerShape(50.dp)
-                    )
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(text = "🎨", fontSize = 14.sp)
-                Text(
-                    text = "Fondo",
-                    color = if (isDarkMode) Color.White else Color(0xFF0F172A),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-
-        // Arrow Left ◀ (Highlighted when focused)
-        Box(
-            modifier = Modifier
-                .scale(if (isArrowFocused) 1.35f else 1f)
-                .clip(CircleShape)
-                .background(if (isArrowFocused) Color(0x3338BDF8) else Color.Transparent)
-                .border(
-                    width = if (isArrowFocused) 2.dp else 0.dp,
-                    color = if (isArrowFocused) FocusCyan else Color.Transparent,
-                    shape = CircleShape
-                )
-                .padding(8.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "◀",
-                color = if (isArrowFocused) FocusCyan else defaultArrowColor,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
-            )
-        }
+        Text(
+            text = (if (compact) "" else eventEmoji(event.type)) + event.title,
+            fontSize = if (compact) 9.sp else 10.sp,
+            lineHeight = if (compact) 11.sp else 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (isDarkMode) Color.White else Color(0xFF0F172A),
+            maxLines = if (compact) 1 else 2,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
-// -----------------------------------------------------------------------------
-// REFINED TOP SNEAK: BARE WEATHER + ROLLING TODAY + 6 DAYS + CENTERED ▲ ARROW
-// -----------------------------------------------------------------------------
+@Composable
+private fun EdgeArrow(symbol: String, focused: Boolean, defaultColor: Color, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .scale(if (focused) 1.3f else 1f)
+            .clip(CircleShape)
+            .background(if (focused) Color(0x3338BDF8) else Color.Transparent)
+            .border(
+                width = if (focused) 2.dp else 0.dp,
+                color = if (focused) FocusCyan else Color.Transparent,
+                shape = CircleShape
+            )
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = symbol,
+            color = if (focused) FocusCyan else defaultColor,
+            fontWeight = FontWeight.Bold,
+            fontSize = 18.sp
+        )
+    }
+}
 
-data class DayPillInfo(
+@Composable
+private fun CountBubble(icon: String, count: Int, isDarkMode: Boolean) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50.dp))
+            .background(if (isDarkMode) Color(0x990F172A) else Color(0xE6FFFFFF))
+            .border(1.dp, if (isDarkMode) Color(0x33FFFFFF) else Color(0x18000000), RoundedCornerShape(50.dp))
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(text = icon, fontSize = 14.sp)
+        Text(
+            text = "$count",
+            color = if (isDarkMode) Color.White else Color(0xFF0F172A),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+private data class DayPillInfo(
     val dayLabel: String,
     val dayNum: Int,
-    val dateStr: String,
     val isToday: Boolean,
     val events: List<CalendarEvent>
 )
 
+private const val MAX_DAY_CHIPS = 5
+
 @Composable
-fun RefinedTopCalendarSneak(
-    weather: WeatherInfo,
-    events: List<CalendarEvent>,
-    isDarkMode: Boolean,
-    isArrowFocused: Boolean,
-    defaultArrowColor: Color,
-    onOpenMonth: () -> Unit
-) {
+fun WeekStrip(weather: WeatherInfo, events: List<CalendarEvent>, isDarkMode: Boolean) {
     var dayStamp by remember { mutableStateOf(SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -836,361 +852,167 @@ fun RefinedTopCalendarSneak(
         }
     }
     val eventsSnapshot = events.toList()
-
     val dayPills = remember(dayStamp, eventsSnapshot) {
-        val todayCal = Calendar.getInstance()
-        val sdfDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val sdfDate = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         val sdfDayName = SimpleDateFormat("EEE", Locale("es", "ES"))
-
         (0..6).map { offset ->
-            val dayCal = (todayCal.clone() as Calendar).apply {
-                add(Calendar.DAY_OF_YEAR, offset)
-            }
+            val dayCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, offset) }
             val dateStr = sdfDate.format(dayCal.time)
-            val dayNum = dayCal.get(Calendar.DAY_OF_MONTH)
-            val dayName = if (offset == 0) "HOY" else sdfDayName.format(dayCal.time).uppercase().take(3)
-
-            // Match real events from Notion for this date or dayOfMonth
-            val matchingEvents = events.filter { it.occursOn(dateStr) }
-
             DayPillInfo(
-                dayLabel = dayName,
-                dayNum = dayNum,
-                dateStr = dateStr,
+                dayLabel = if (offset == 0) "HOY" else sdfDayName.format(dayCal.time).uppercase().take(3),
+                dayNum = dayCal.get(Calendar.DAY_OF_MONTH),
                 isToday = offset == 0,
-                events = matchingEvents
+                events = eventsSnapshot.filter { it.occursOn(dateStr) }
             )
         }
     }
+    val textColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
+    val mutedColor = if (isDarkMode) Color(0xFFCBD5E1) else Color(0xFF475569)
 
-    Column(
-        modifier = Modifier.fillMaxWidth(0.96f),
-        horizontalAlignment = Alignment.CenterHorizontally
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Max),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        Column(
+            modifier = Modifier.padding(end = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Bare Weather
+            Text(text = weather.iconEmoji, fontSize = 26.sp, textAlign = TextAlign.Center)
+            Text(text = "${weather.tempC}°C", fontWeight = FontWeight.Bold, color = textColor, fontSize = 14.sp)
+        }
+        dayPills.forEach { pill ->
+            val accent = if (pill.isToday) FocusCyan else null
             Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-                modifier = Modifier.padding(end = 6.dp)
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        if (pill.isToday) (if (isDarkMode) Color(0x660284C7) else Color(0xE6E0F2FE))
+                        else if (isDarkMode) Color(0x990F172A) else Color(0xE6FFFFFF)
+                    )
+                    .border(
+                        width = if (pill.isToday) 1.5.dp else 1.dp,
+                        color = accent ?: if (isDarkMode) Color(0x33FFFFFF) else Color(0x18000000),
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                    .padding(horizontal = 7.dp, vertical = 6.dp)
             ) {
-                Text(
-                    text = weather.iconEmoji,
-                    fontSize = 26.sp,
-                    textAlign = TextAlign.Center
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = pill.dayLabel,
+                        fontWeight = FontWeight.Bold,
+                        color = if (pill.isToday) (if (isDarkMode) FocusCyan else Color(0xFF0369A1)) else mutedColor,
+                        fontSize = 11.sp
+                    )
+                    Text(
+                        text = "${pill.dayNum}",
+                        fontWeight = FontWeight.Bold,
+                        color = if (pill.isToday) (if (isDarkMode) FocusCyan else Color(0xFF0369A1)) else textColor,
+                        fontSize = 14.sp
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .padding(vertical = 4.dp)
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(if (isDarkMode) Color(0x33FFFFFF) else Color(0x22000000))
                 )
-                Text(
-                    text = "${weather.tempC}°C",
-                    fontWeight = FontWeight.Bold,
-                    color = if (isDarkMode) Color.White else Color(0xFF0F172A),
-                    fontSize = 14.sp
-                )
-            }
-
-            // 7 Rolling Day Bubbles (Today + 6 Days)
-            Row(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                dayPills.forEach { pill ->
-                    val hasBirthday = pill.events.any { it.type.contains("Cumple", ignoreCase = true) }
-                    val hasEvent = pill.events.isNotEmpty()
-
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(60.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(
-                                if (hasBirthday) (if (isDarkMode) Color(0x66F43F5E) else Color(0xF2FFE4E6))
-                                else if (pill.isToday) (if (isDarkMode) Color(0x660284C7) else Color(0xF2E0F2FE))
-                                else if (isDarkMode) Color(0x990F172A)
-                                else Color(0xF2FFFFFF)
-                            )
-                            .border(
-                                width = if (hasBirthday || pill.isToday) 1.5.dp else 1.dp,
-                                color = if (hasBirthday) Color(0xFFF43F5E)
-                                else if (pill.isToday) FocusCyan
-                                else if (isDarkMode) Color(0x33FFFFFF)
-                                else Color(0x18000000),
-                                shape = RoundedCornerShape(14.dp)
-                            )
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalArrangement = Arrangement.SpaceBetween,
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = pill.dayLabel,
-                                fontWeight = FontWeight.Bold,
-                                color = if (hasBirthday) (if (isDarkMode) Color(0xFFFDA4AF) else Color(0xFFBE123C))
-                                else if (pill.isToday) (if (isDarkMode) FocusCyan else Color(0xFF0369A1))
-                                else if (isDarkMode) Color(0xFF94A3B8)
-                                else Color(0xFF64748B),
-                                fontSize = 10.sp
-                            )
-                            Text(
-                                text = "${pill.dayNum}",
-                                fontWeight = FontWeight.Bold,
-                                color = if (pill.isToday) (if (isDarkMode) FocusCyan else Color(0xFF0369A1))
-                                else if (isDarkMode) Color.White
-                                else Color(0xFF0F172A),
-                                fontSize = 12.sp
-                            )
-                        }
-
-                        // Real Event Only — No hardcoded placeholders!
-                        if (hasEvent) {
-                            val ev = pill.events.first()
-                            val prefix = if (ev.type.contains("Cumple", ignoreCase = true)) "🎂 " else "📌 "
-                            Text(
-                                text = "$prefix${ev.title}",
-                                color = if (hasBirthday) (if (isDarkMode) Color(0xFFFFE4E6) else Color(0xFFE11D48))
-                                else if (isDarkMode) Color(0xFFE0F2FE) else Color(0xFF0369A1),
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        } else {
-                            Text(text = "—", color = Color(0x33888888), fontSize = 9.sp)
-                        }
+                val overflow = pill.events.size > MAX_DAY_CHIPS
+                val shown = if (overflow) pill.events.take(MAX_DAY_CHIPS - 1) else pill.events
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    shown.forEach { EventChip(it, isDarkMode) }
+                    if (overflow) {
+                        Text(
+                            text = "+${pill.events.size - shown.size} más",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = mutedColor
+                        )
                     }
                 }
             }
         }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Centered Arrow ▲ below row (Highlighted when focused)
-        Box(
-            modifier = Modifier
-                .scale(if (isArrowFocused) 1.35f else 1f)
-                .clip(CircleShape)
-                .background(if (isArrowFocused) Color(0x3338BDF8) else Color.Transparent)
-                .border(
-                    width = if (isArrowFocused) 2.dp else 0.dp,
-                    color = if (isArrowFocused) FocusCyan else Color.Transparent,
-                    shape = CircleShape
-                )
-                .clickable { onOpenMonth() }
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "▲",
-                color = if (isArrowFocused) FocusCyan else defaultArrowColor,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
-            )
-        }
     }
 }
-
-// -----------------------------------------------------------------------------
-// REFINED BOTTOM DOCK: CENTERED ▼ ARROW ABOVE + 5 FLOATING APP CIRCLES (BUILT-IN ICONS)
-// -----------------------------------------------------------------------------
 
 @Composable
 fun RefinedFavoritesDock(
     apps: List<InstalledApp>,
     isDockFocused: Boolean,
     focusedIndex: Int,
-    isArrowFocused: Boolean,
-    defaultArrowColor: Color,
     primaryTextColor: Color,
     onSelectIndex: (Int) -> Unit,
-    onLaunch: (String) -> Unit,
-    onOpenAllApps: () -> Unit
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        // Centered Arrow ▼ above the apps (Highlighted when focused)
-        Box(
-            modifier = Modifier
-                .scale(if (isArrowFocused) 1.35f else 1f)
-                .clip(CircleShape)
-                .background(if (isArrowFocused) Color(0x3338BDF8) else Color.Transparent)
-                .border(
-                    width = if (isArrowFocused) 2.dp else 0.dp,
-                    color = if (isArrowFocused) FocusCyan else Color.Transparent,
-                    shape = CircleShape
-                )
-                .clickable { onOpenAllApps() }
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "▼",
-                color = if (isArrowFocused) FocusCyan else defaultArrowColor,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
-            )
-        }
-
-        // 5 Floating Circular App Icons with remote focus state & built-in icons
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(24.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            apps.forEachIndexed { index, app ->
-                val isSelected = isDockFocused && index == focusedIndex
-
-                Column(
-                    modifier = Modifier
-                        .scale(if (isSelected) 1.2f else 1f)
-                        .clickable {
-                            onSelectIndex(index)
-                            onLaunch(app.packageName)
-                        },
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(CircleShape)
-                            .background(if (app.iconBitmap != null) Color.Transparent else Color(app.color))
-                            .border(
-                                width = if (isSelected) 3.5.dp else 1.5.dp,
-                                color = if (isSelected) FocusCyan else Color(0x44FFFFFF),
-                                shape = CircleShape
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (app.iconBitmap != null) {
-                            Image(
-                                bitmap = app.iconBitmap.asImageBitmap(),
-                                contentDescription = app.name,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(CircleShape),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Text(
-                                text = app.iconEmoji,
-                                color = Color.White,
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = app.name,
-                        fontSize = 13.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isSelected) FocusCyan else primaryTextColor,
-                        maxLines = 1
-                    )
-                }
-            }
-        }
-    }
-}
-
-// -----------------------------------------------------------------------------
-// REFINED RIGHT SNEAK: ARROW ▶ LEFT + 2 FLOATING BUBBLES
-// -----------------------------------------------------------------------------
-
-@Composable
-fun RefinedRightListsSneak(
-    todoCount: Int,
-    groceryCount: Int,
-    isDarkMode: Boolean,
-    isArrowFocused: Boolean,
-    defaultArrowColor: Color,
-    onOpenLists: () -> Unit
+    onLaunch: (String) -> Unit
 ) {
     Row(
-        modifier = Modifier.clickable { onOpenLists() },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(24.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        // Arrow Right ▶ (Highlighted when focused)
-        Box(
-            modifier = Modifier
-                .scale(if (isArrowFocused) 1.35f else 1f)
-                .clip(CircleShape)
-                .background(if (isArrowFocused) Color(0x3338BDF8) else Color.Transparent)
-                .border(
-                    width = if (isArrowFocused) 2.dp else 0.dp,
-                    color = if (isArrowFocused) FocusCyan else Color.Transparent,
-                    shape = CircleShape
+        apps.forEachIndexed { index, app ->
+            val isSelected = isDockFocused && index == focusedIndex
+            Column(
+                modifier = Modifier
+                    .scale(if (isSelected) 1.2f else 1f)
+                    .clickable {
+                        onSelectIndex(index)
+                        onLaunch(app.packageName)
+                    },
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(if (app.iconBitmap != null) Color.Transparent else Color(app.color))
+                        .border(
+                            width = if (isSelected) 3.5.dp else 1.5.dp,
+                            color = if (isSelected) FocusCyan else Color(0x44FFFFFF),
+                            shape = CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (app.iconBitmap != null) {
+                        Image(
+                            bitmap = app.iconBitmap.asImageBitmap(),
+                            contentDescription = app.name,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Text(text = app.iconEmoji, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = app.name,
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (isSelected) FocusCyan else primaryTextColor,
+                    maxLines = 1
                 )
-                .padding(8.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "▶",
-                color = if (isArrowFocused) FocusCyan else defaultArrowColor,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
-            )
-        }
-
-        // 2 Floating Glass Bubbles
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            // Tasks Bubble
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50.dp))
-                    .background(if (isDarkMode) Color(0x550284C7) else Color(0xDD0284C7))
-                    .border(
-                        width = 1.dp,
-                        color = Color(0x4438BDF8),
-                        shape = RoundedCornerShape(50.dp)
-                    )
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(text = "📋", fontSize = 14.sp)
-                Text(text = "$todoCount", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            }
-
-            // Grocery Bubble
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50.dp))
-                    .background(if (isDarkMode) Color(0x55059669) else Color(0xDD059669))
-                    .border(
-                        width = 1.dp,
-                        color = Color(0x4434D399),
-                        shape = RoundedCornerShape(50.dp)
-                    )
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(text = "🛒", fontSize = 14.sp)
-                Text(text = "$groceryCount", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
 }
 
-// -----------------------------------------------------------------------------
-// AMBIENT CLOCK HERO
-// -----------------------------------------------------------------------------
-
 @Composable
-fun AmbientClockHero(textColor: Color, dateColor: Color) {
+fun AmbientClockHero(textColor: Color) {
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val dateFormat = remember { SimpleDateFormat("EEEE, d 'de' MMMM 'de' yyyy", Locale("es", "ES")) }
-    val clockShadow = androidx.compose.ui.graphics.Shadow(if (textColor == Color.White) Color(0xAA000000) else Color(0xAAFFFFFF), blurRadius = 14f)
+    val clockShadow = androidx.compose.ui.graphics.Shadow(
+        if (textColor == Color.White) Color(0xAA000000) else Color(0xAAFFFFFF),
+        blurRadius = 14f
+    )
     var now by remember { mutableStateOf(Date()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -1210,7 +1032,7 @@ fun AmbientClockHero(textColor: Color, dateColor: Color) {
         )
         Text(
             text = dateFormat.format(now).replaceFirstChar { it.uppercase() },
-            color = dateColor,
+            color = textColor,
             fontSize = 22.sp,
             fontWeight = FontWeight.Medium,
             style = androidx.compose.ui.text.TextStyle(shadow = clockShadow)
@@ -1228,56 +1050,26 @@ fun SettingsWallpaperScreen(
     focusedIndex: Int,
     currentWallpaper: String,
     onToggleDarkMode: () -> Unit,
-    onSelectWallpaper: (String) -> Unit,
-    onClose: () -> Unit
+    onSelectWallpaper: (String) -> Unit
 ) {
     val context = LocalContext.current
     val titleColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
     val subtextColor = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
-    val cardBg = if (isDarkMode) Color(0x14FFFFFF) else Color(0xEEFFFFFF)
+    val cardBg = if (isDarkMode) Color(0x14FFFFFF) else Color(0xD9FFFFFF)
     val cardBorder = if (isDarkMode) Color(0x22FFFFFF) else Color(0x18000000)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(if (isDarkMode) Color(0xDD0F172A) else Color(0xF0F8FAFC))
+            .background(if (isDarkMode) Color(0xDD0F172A) else Color(0xE3F8FAFC))
             .padding(ScreenPadding)
     ) {
-        // Simplified Minimal Header
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Ajustes & Personalización",
-                color = titleColor,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Light
-            )
-
-            // Volver button (Focus index 3)
-            val isVolverFocused = focusedIndex == 3
-            Box(
-                modifier = Modifier
-                    .scale(if (isVolverFocused) 1.08f else 1f)
-                    .clip(RoundedCornerShape(50.dp))
-                    .background(if (isVolverFocused) Color(0x3338BDF8) else if (isDarkMode) Color(0x22FFFFFF) else Color(0x15000000))
-                    .border(
-                        width = if (isVolverFocused) 2.dp else 1.dp,
-                        color = if (isVolverFocused) FocusCyan else if (isDarkMode) Color(0x44FFFFFF) else Color(0x22000000),
-                        shape = RoundedCornerShape(50.dp)
-                    )
-                    .clickable { onClose() }
-                    .padding(horizontal = 20.dp, vertical = 10.dp)
-            ) {
-                Text(
-                    text = "✕ Volver",
-                    color = if (isVolverFocused) FocusCyan else titleColor,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
+        Text(
+            text = "Ajustes & Personalización",
+            color = titleColor,
+            fontSize = 30.sp,
+            fontWeight = FontWeight.Light
+        )
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -1495,24 +1287,8 @@ private suspend fun LazyGridState.ensureVisible(index: Int) {
 }
 
 @Composable
-private fun ScreenHeader(title: String, titleColor: Color, isDarkMode: Boolean, onClose: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(text = title, color = titleColor, fontSize = 30.sp, fontWeight = FontWeight.Light)
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(50.dp))
-                .background(if (isDarkMode) Color(0x22FFFFFF) else Color(0x15000000))
-                .border(1.dp, if (isDarkMode) Color(0x44FFFFFF) else Color(0x22000000), RoundedCornerShape(50.dp))
-                .clickable { onClose() }
-                .padding(horizontal = 20.dp, vertical = 8.dp)
-        ) {
-            Text(text = "✕ Volver", color = titleColor, fontWeight = FontWeight.Medium)
-        }
-    }
+private fun ScreenHeader(title: String, titleColor: Color) {
+    Text(text = title, color = titleColor, fontSize = 30.sp, fontWeight = FontWeight.Light)
 }
 
 @Composable
@@ -1545,14 +1321,16 @@ fun MonthCalendarScreen(
     isDarkMode: Boolean,
     focusedDay: Int,
     monthOffset: Int = 0,
+    editMode: Boolean = false,
     onChangeMonth: (Int) -> Unit = {},
-    onOpenCalendarChoice: (String) -> Unit = {},
-    onClose: () -> Unit
+    onToggleEditMode: () -> Unit = {},
+    onOpenCalendarChoice: (String) -> Unit = {}
 ) {
     val titleColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
     val subtextColor = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
-    val cardBg = if (isDarkMode) Color(0x14FFFFFF) else Color(0xEEFFFFFF)
+    val cardBg = if (isDarkMode) Color(0x14FFFFFF) else Color(0xD9FFFFFF)
     val cardBorder = if (isDarkMode) Color(0x22FFFFFF) else Color(0x18000000)
+    val amber = Color(0xFFFBBF24)
 
     val now = remember(monthOffset) {
         Calendar.getInstance().apply {
@@ -1572,7 +1350,7 @@ fun MonthCalendarScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(if (isDarkMode) Color(0xDD0F172A) else Color(0xF0F8FAFC))
+            .background(if (isDarkMode) Color(0xDD0F172A) else Color(0xE3F8FAFC))
             .padding(ScreenPadding)
     ) {
         Row(
@@ -1592,15 +1370,17 @@ fun MonthCalendarScreen(
                 )
                 MonthArrow("▶", focusedDay == -1, isDarkMode, titleColor) { onChangeMonth(1) }
             }
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50.dp))
-                    .background(if (isDarkMode) Color(0x22FFFFFF) else Color(0x15000000))
-                    .border(1.dp, if (isDarkMode) Color(0x44FFFFFF) else Color(0x22000000), RoundedCornerShape(50.dp))
-                    .clickable { onClose() }
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-            ) {
-                Text(text = "✕ Volver", color = titleColor, fontWeight = FontWeight.Medium)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (editMode) Text(text = "Pulsa OK sobre un día para editar sus eventos", fontSize = 12.sp, color = amber)
+                HeaderChip(
+                    label = if (editMode) "✓ Listo" else "✎ Editar",
+                    focused = focusedDay == -2,
+                    isDarkMode = isDarkMode,
+                    titleColor = titleColor,
+                    cardBorder = cardBorder,
+                    active = editMode,
+                    onClick = onToggleEditMode
+                )
             }
         }
 
@@ -1647,8 +1427,10 @@ fun MonthCalendarScreen(
                         val dayEvents = events.filter { it.occursOn(dateStr) }
                         val isFocused = day == focusedDay
                         val isToday = day == todayNum
+                        val overflow = dayEvents.size > 4
+                        val shown = if (overflow) dayEvents.take(3) else dayEvents
 
-                        Box(
+                        Row(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight()
@@ -1660,33 +1442,32 @@ fun MonthCalendarScreen(
                                 )
                                 .border(
                                     width = if (isFocused) 2.5.dp else if (isToday) 1.5.dp else 1.dp,
-                                    color = if (isFocused) FocusCyan else if (isToday) FocusCyan.copy(alpha = 0.6f) else cardBorder,
+                                    color = if (isFocused) FocusCyan else if (isToday) FocusCyan.copy(alpha = 0.6f) else if (editMode && dayEvents.isNotEmpty()) amber else cardBorder,
                                     shape = RoundedCornerShape(10.dp)
                                 )
                                 .clickable { onOpenCalendarChoice(dateStr) }
-                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                                .padding(horizontal = 5.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Column {
-                                Text(
-                                    text = "$day",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    color = if (isFocused || isToday) FocusCyan else titleColor
-                                )
-                                dayEvents.take(2).forEach { ev ->
-                                    val isBirthday = ev.type.contains("Cumple", ignoreCase = true)
+                            Text(
+                                text = "$day",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = if (isFocused || isToday) FocusCyan else titleColor,
+                                modifier = Modifier.widthIn(min = 16.dp)
+                            )
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                shown.forEach { EventChip(it, isDarkMode, compact = true) }
+                                if (overflow) {
                                     Text(
-                                        text = "${if (isBirthday) "🎂" else "📌"} ${ev.title}",
-                                        fontSize = 10.sp,
-                                        color = if (isBirthday) (if (isDarkMode) Color(0xFFFDA4AF) else Color(0xFFE11D48))
-                                        else if (isDarkMode) Color(0xFF38BDF8) else Color(0xFF0284C7),
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        text = "+${dayEvents.size - shown.size} más",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = subtextColor
                                     )
-                                }
-                                if (dayEvents.size > 2) {
-                                    Text(text = "+${dayEvents.size - 2}", fontSize = 10.sp, color = subtextColor)
                                 }
                             }
                         }
@@ -1701,7 +1482,14 @@ fun MonthCalendarScreen(
 // DRAWER 3 (RIGHT ▶): FAMILY TO-DO & GROCERY LISTS (7-DAY FILTER)
 // -----------------------------------------------------------------------------
 
-private data class ListRowData(val text: String, val completed: Boolean, val trailing: String, val trailingColor: Color)
+private data class ListRowData(
+    val text: String,
+    val completed: Boolean,
+    val trailing: String,
+    val trailingColor: Color,
+    val posterUrl: String? = null,
+    val detail: String = ""
+)
 
 @Composable
 private fun HeaderChip(
@@ -1759,7 +1547,7 @@ private fun ListCard(
 ) {
     val titleColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
     val subtextColor = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
-    val cardBg = if (isDarkMode) Color(0x14FFFFFF) else Color(0xEEFFFFFF)
+    val cardBg = if (isDarkMode) Color(0x14FFFFFF) else Color(0xD9FFFFFF)
     val cardBorder = if (isDarkMode) Color(0x22FFFFFF) else Color(0x18000000)
     val amber = Color(0xFFFBBF24)
     val listState = rememberLazyListState()
@@ -1813,34 +1601,57 @@ private fun ListCard(
                         .fillMaxWidth()
                         .scale(if (isItemFocused) 1.02f else 1f)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(if (isItemFocused) Color(0x3338BDF8) else if (isDarkMode) Color(0x18FFFFFF) else Color(0xFAFFFFFF))
+                        .background(if (isItemFocused) Color(0x3338BDF8) else if (isDarkMode) Color(0x18FFFFFF) else Color(0xE8FFFFFF))
                         .border(
                             width = if (isItemFocused) 2.dp else if (editMode) 1.5.dp else 1.dp,
                             color = if (isItemFocused) FocusCyan else if (editMode) amber else cardBorder,
                             shape = RoundedCornerShape(10.dp)
                         )
                         .clickable { if (editMode) onEdit(index) else onToggle(index) }
-                        .padding(12.dp),
+                        .padding(if (row.posterUrl != null) 8.dp else 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = "${if (row.completed) "☑" else "○"} ${row.text}",
-                        fontSize = 15.sp,
-                        color = if (row.completed) subtextColor else titleColor,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    if (row.posterUrl != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(width = 44.dp, height = 64.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (isDarkMode) Color(0x33FFFFFF) else Color(0x14000000)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (row.posterUrl.isNotEmpty()) {
+                                AsyncImage(
+                                    model = row.posterUrl,
+                                    contentDescription = row.text,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Text(text = "🎞", fontSize = 20.sp)
+                            }
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "${if (row.completed) "☑" else "○"} ${row.text}",
+                            fontSize = 15.sp,
+                            color = if (row.completed) subtextColor else titleColor,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (row.detail.isNotEmpty()) {
+                            Text(text = row.detail, fontSize = 12.sp, color = subtextColor, maxLines = 1)
+                        }
+                    }
                     if (editMode) {
-                        Text(text = "✎", fontSize = 16.sp, color = amber, modifier = Modifier.padding(start = 8.dp))
+                        Text(text = "✎", fontSize = 16.sp, color = amber)
                     } else if (row.trailing.isNotBlank()) {
                         Text(
                             text = row.trailing,
                             fontSize = 12.sp,
                             color = row.trailingColor,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(start = 8.dp)
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
@@ -1868,8 +1679,7 @@ fun FamilyListsScreen(
     onToggleTasksEdit: () -> Unit = {},
     onToggleGroceriesEdit: () -> Unit = {},
     onEditTask: (Int) -> Unit = {},
-    onEditGrocery: (Int) -> Unit = {},
-    onClose: () -> Unit
+    onEditGrocery: (Int) -> Unit = {}
 ) {
     val titleColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
     val subtextColor = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
@@ -1881,10 +1691,10 @@ fun FamilyListsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(if (isDarkMode) Color(0xDD0F172A) else Color(0xF0F8FAFC))
+            .background(if (isDarkMode) Color(0xDD0F172A) else Color(0xE3F8FAFC))
             .padding(ScreenPadding)
     ) {
-        ScreenHeader("Tareas & Compra", titleColor, isDarkMode, onClose)
+        ScreenHeader("Tareas & Compra", titleColor)
 
         Spacer(modifier = Modifier.height(14.dp))
 
@@ -1946,12 +1756,12 @@ fun AllAppsDrawerScreen(
     message: String?,
     onToggleEditMode: () -> Unit,
     onToggleFavorite: (String) -> Unit,
-    onLaunch: (String) -> Unit,
-    onClose: () -> Unit
+    onOpenSettings: () -> Unit,
+    onLaunch: (String) -> Unit
 ) {
     val titleColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
     val subtextColor = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
-    val cardBg = if (isDarkMode) Color(0x14FFFFFF) else Color(0xEEFFFFFF)
+    val cardBg = if (isDarkMode) Color(0x14FFFFFF) else Color(0xD9FFFFFF)
     val cardBorder = if (isDarkMode) Color(0x22FFFFFF) else Color(0x18000000)
     val starColor = Color(0xFFFBBF24)
     val gridState = rememberLazyGridState()
@@ -1964,7 +1774,7 @@ fun AllAppsDrawerScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(if (isDarkMode) Color(0xDD0F172A) else Color(0xF0F8FAFC))
+            .background(if (isDarkMode) Color(0xDD0F172A) else Color(0xE3F8FAFC))
             .padding(ScreenPadding)
     ) {
         Row(
@@ -1973,42 +1783,17 @@ fun AllAppsDrawerScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(text = "Aplicaciones", color = titleColor, fontSize = 30.sp, fontWeight = FontWeight.Light)
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                val editFocused = focusedAppIndex == -1
-                Row(
-                    modifier = Modifier
-                        .scale(if (editFocused) 1.06f else 1f)
-                        .clip(RoundedCornerShape(50.dp))
-                        .background(
-                            if (editFocused) FocusCyan
-                            else if (editMode) Color(0x33FBBF24)
-                            else if (isDarkMode) Color(0x22FFFFFF) else Color(0x15000000)
-                        )
-                        .border(
-                            width = if (editFocused || editMode) 2.dp else 1.dp,
-                            color = if (editFocused) FocusCyan else if (editMode) starColor else if (isDarkMode) Color(0x44FFFFFF) else Color(0x22000000),
-                            shape = RoundedCornerShape(50.dp)
-                        )
-                        .clickable { onToggleEditMode() }
-                        .padding(horizontal = 18.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (editMode) "✓ Listo  ${favoritePackages.size}/5" else "★ Favoritas  ${favoritePackages.size}/5",
-                        fontWeight = FontWeight.Medium,
-                        color = if (editFocused) Color.Black else titleColor
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50.dp))
-                        .background(if (isDarkMode) Color(0x22FFFFFF) else Color(0x15000000))
-                        .border(1.dp, if (isDarkMode) Color(0x44FFFFFF) else Color(0x22000000), RoundedCornerShape(50.dp))
-                        .clickable { onClose() }
-                        .padding(horizontal = 20.dp, vertical = 8.dp)
-                ) {
-                    Text(text = "✕ Volver", color = titleColor, fontWeight = FontWeight.Medium)
-                }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                HeaderChip("⚙ Ajustes", focusedAppIndex == -2, isDarkMode, titleColor, cardBorder, onClick = onOpenSettings)
+                HeaderChip(
+                    label = if (editMode) "✓ Listo" else "✎ Editar",
+                    focused = focusedAppIndex == -1,
+                    isDarkMode = isDarkMode,
+                    titleColor = titleColor,
+                    cardBorder = cardBorder,
+                    active = editMode,
+                    onClick = onToggleEditMode
+                )
             }
         }
 
@@ -2016,7 +1801,7 @@ fun AllAppsDrawerScreen(
 
         Text(
             text = message
-                ?: if (editMode) "Pulsa OK sobre una app para añadirla o quitarla del inicio (máximo 5)" else " ",
+                ?: if (editMode) "Pulsa OK sobre una app para añadirla o quitarla del inicio (${favoritePackages.size}/5)" else " ",
             color = if (message != null) starColor else subtextColor,
             fontSize = 13.sp,
             fontWeight = if (message != null) FontWeight.Bold else FontWeight.Normal
@@ -2085,6 +1870,185 @@ fun AllAppsDrawerScreen(
                     }
                     if (isFavorite) {
                         Text(text = "★", color = starColor, fontSize = 18.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+fun WatchScreen(watch: WatchState, actions: WatchActions, isDarkMode: Boolean) {
+    val titleColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
+    val subtextColor = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
+    val whoColor = if (isDarkMode) Color(0xFFA5B4FC) else Color(0xFF4F46E5)
+
+    fun rows(items: List<WatchItem>) = items.visibleWatch().map { item ->
+        val detail = listOfNotNull(
+            item.year?.toString(),
+            item.rating?.let { "★ %.1f".format(Locale.US, it) }
+        ).joinToString("  ·  ")
+        ListRowData(item.title, item.watched, item.who, whoColor, item.posterUrl, detail)
+    }
+
+    val movies = watch.movies.visibleWatch()
+    val shows = watch.shows.visibleWatch()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(if (isDarkMode) Color(0xDD0F172A) else Color(0xE3F8FAFC))
+            .padding(ScreenPadding)
+    ) {
+        ScreenHeader("Películas & Series", titleColor)
+        Spacer(modifier = Modifier.height(14.dp))
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            ListCard(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                title = "🎬 Películas",
+                subtitle = "${movies.count { !it.watched }} por ver",
+                rows = rows(watch.movies),
+                columnFocused = watch.focusedColumn == 0,
+                focusedIndex = watch.movieIndex,
+                editMode = watch.moviesEdit,
+                isDarkMode = isDarkMode,
+                onToggle = actions.onToggleMovie,
+                onEdit = actions.onEditMovie,
+                onToggleEditMode = actions.onToggleMoviesEdit,
+                onDictate = actions.onDictateMovie,
+                onType = actions.onTypeMovie
+            )
+            ListCard(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                title = "📺 Series",
+                subtitle = "${shows.count { !it.watched }} por ver",
+                rows = rows(watch.shows),
+                columnFocused = watch.focusedColumn == 1,
+                focusedIndex = watch.showIndex,
+                editMode = watch.showsEdit,
+                isDarkMode = isDarkMode,
+                onToggle = actions.onToggleShow,
+                onEdit = actions.onEditShow,
+                onToggleEditMode = actions.onToggleShowsEdit,
+                onDictate = actions.onDictateShow,
+                onType = actions.onTypeShow
+            )
+        }
+    }
+}
+
+@Composable
+fun SearchOverlay(
+    ui: SearchUi,
+    selectedIndex: Int,
+    isDarkMode: Boolean,
+    onPick: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val titleColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
+    val subtextColor = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
+    val results = ui.results
+    val cells = (results?.size ?: 0) + 1
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xCC000000))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .clip(RoundedCornerShape(24.dp))
+                .background(if (isDarkMode) Color(0xFF1E293B) else Color.White)
+                .border(1.5.dp, FocusCyan, RoundedCornerShape(24.dp))
+                .padding(20.dp)
+        ) {
+            Text(
+                text = "${if (ui.isShow) "Serie" else "Película"}: «${ui.query}»",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = titleColor
+            )
+            when {
+                results == null -> Text(text = "Buscando…", fontSize = 15.sp, color = subtextColor)
+                ui.failed -> Text(text = "No se pudo buscar. Puedes añadir solo el título.", fontSize = 15.sp, color = subtextColor)
+                results.isEmpty() -> Text(text = "Sin resultados. Puedes añadir solo el título.", fontSize = 15.sp, color = subtextColor)
+                else -> Text(text = "Elige el correcto con OK", fontSize = 13.sp, color = subtextColor)
+            }
+            if (results != null) {
+                (0 until cells).chunked(5).forEach { rowCells ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        rowCells.forEach { i ->
+                            val focused = i == selectedIndex
+                            val result = results.getOrNull(i)
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .scale(if (focused) 1.05f else 1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (focused) Color(0x3338BDF8) else if (isDarkMode) Color(0x18FFFFFF) else Color(0x0F000000))
+                                    .border(
+                                        width = if (focused) 2.5.dp else 1.dp,
+                                        color = if (focused) FocusCyan else if (isDarkMode) Color(0x33FFFFFF) else Color(0x22000000),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    .clickable { onPick(i) }
+                                    .padding(6.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(width = 80.dp, height = 118.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isDarkMode) Color(0x33FFFFFF) else Color(0x14000000)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (result != null && result.posterUrl.isNotEmpty()) {
+                                        AsyncImage(
+                                            model = result.posterUrl,
+                                            contentDescription = result.title,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Text(text = if (result == null) "＋" else "🎞", fontSize = 26.sp, color = titleColor)
+                                    }
+                                }
+                                Text(
+                                    text = result?.title ?: "Solo el título",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = titleColor,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    textAlign = TextAlign.Center,
+                                    lineHeight = 14.sp
+                                )
+                                Text(
+                                    text = if (result == null) "sin carátula" else listOfNotNull(
+                                        result.year?.toString(),
+                                        result.rating?.let { "★ %.1f".format(Locale.US, it) }
+                                    ).joinToString("  "),
+                                    fontSize = 11.sp,
+                                    color = subtextColor
+                                )
+                            }
+                        }
+                        repeat(5 - rowCells.size) { Spacer(modifier = Modifier.weight(1f)) }
                     }
                 }
             }

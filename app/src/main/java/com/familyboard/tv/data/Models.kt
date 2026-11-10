@@ -44,11 +44,12 @@ data class WeatherInfo(
 )
 
 enum class ActiveSection {
-    CENTER,   // Clean Wallpaper Landing
-    MONTH,    // UP (▲) Full Month Smoked Glass Calendar
-    LISTS,    // RIGHT (▶) Dual Board (TODOs & Grocery)
-    APPS,     // DOWN (▼) Full App Drawer
-    SETTINGS  // LEFT (◀) Settings, Theme & Wallpaper Menu
+    CENTER,
+    MONTH,
+    LISTS,
+    APPS,
+    WATCH,
+    SETTINGS
 }
 
 enum class CenterFocusArea {
@@ -86,10 +87,11 @@ val ALL_WALLPAPERS = listOf(
 data class NotionOptions(
     val who: List<String> = emptyList(),
     val groceryTypes: List<String> = emptyList(),
-    val eventTypes: List<String> = emptyList()
+    val eventTypes: List<String> = emptyList(),
+    val watchWho: List<String> = emptyList()
 )
 
-enum class EntryKind { TASK, GROCERY, EVENT }
+enum class EntryKind { TASK, GROCERY, EVENT, MOVIE, SHOW }
 
 data class EntryForm(
     val kind: EntryKind,
@@ -123,3 +125,32 @@ fun CalendarEvent.occursOn(dateStr: String): Boolean {
     return monthDay == targetMonthDay ||
         (monthDay == "02-29" && targetMonthDay == "02-28" && !isLeapYear(year))
 }
+
+data class WatchItem(
+    val id: String,
+    val title: String,
+    val year: Int?,
+    val posterUrl: String,
+    val rating: Double?,
+    val overview: String,
+    val who: String,
+    val watched: Boolean,
+    val watchedAt: Long? = null,
+    val tmdbId: Long? = null,
+    val createdAt: Long = 0L
+)
+
+data class TmdbResult(
+    val id: Long,
+    val title: String,
+    val year: Int?,
+    val posterUrl: String,
+    val rating: Double?,
+    val overview: String,
+    val isShow: Boolean
+) {
+    val link: String get() = "https://www.themoviedb.org/${if (isShow) "tv" else "movie"}/$id"
+}
+
+fun List<WatchItem>.visibleWatch(now: Long = System.currentTimeMillis()): List<WatchItem> =
+    filter { !it.watched || it.watchedAt == null || now - it.watchedAt < 7L * 24L * 60L * 60L * 1000L }
