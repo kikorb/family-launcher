@@ -24,9 +24,14 @@ import com.familyboard.tv.ui.WatchState
 import com.familyboard.tv.ui.VoiceInputMode
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 import java.util.Calendar
 
 private const val MAX_FAVORITES = 5
+private const val WALLPAPER_PAGE_SIZE = 12
+private const val MAX_CUSTOM_WALLPAPERS = 15
 
 class MainActivity : ComponentActivity() {
 
@@ -57,7 +62,21 @@ class MainActivity : ComponentActivity() {
     private val groceryIndexState = mutableIntStateOf(0)
 
     private val isDarkModeState = mutableStateOf(true)
-    private val wallpaperState = mutableStateOf(WallpaperCatalog.items.first().assetPath)
+    private val wallpaperState = mutableStateOf(BUILT_IN_WALLPAPERS.first().assetPath)
+    private val customWallpapersState = mutableStateListOf<WallpaperItem>()
+    private val wallpapersEditModeState = mutableStateOf(false)
+    private val wallpaperSearchState = mutableStateOf<WallpaperSearchUi?>(null)
+    private val wallpaperSearchIndexState = mutableIntStateOf(0)
+    private var wallpaperQuery = ""
+    private val wallpaperPool = mutableListOf<WallpaperResult>()
+    private var wallpaperOffset = 0
+    private var wallhavenPage = 1
+    private var wallhavenLastPage = 1
+    private var wallpaperJob: kotlinx.coroutines.Job? = null
+    private val wallpaperDir by lazy { File(filesDir, "wallpapers") }
+
+    private val allWallpapers: List<WallpaperItem>
+        get() = WallpaperCatalog.builtIns + customWallpapersState
 
     private val appsState = mutableStateOf<List<InstalledApp>>(emptyList())
     private var installedPackages: Set<String> = emptySet()
@@ -105,11 +124,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         WallpaperCatalog.load(assets.list("")?.toSet().orEmpty())
-        wallpaperState.value = WallpaperCatalog.items.first().assetPath
+        loadCustomWallpapers()
+        wallpaperState.value = WallpaperCatalog.builtIns.first().assetPath
 
         isDarkModeState.value = prefs.getBoolean("dark", true)
         val savedWallpaper = prefs.getString("wallpaper", null)?.replace("wallpaper_fedora43.png", "wallpaper_fedora43.jpg")
-        if (savedWallpaper != null && WallpaperCatalog.items.any { it.assetPath == savedWallpaper }) {
+        if (savedWallpaper != null && allWallpapers.any { it.assetPath == savedWallpaper }) {
             wallpaperState.value = savedWallpaper
         }
 
@@ -173,6 +193,7 @@ class MainActivity : ComponentActivity() {
                         ActiveSection.WATCH -> openWatch()
                         ActiveSection.LISTS -> openLists()
                         ActiveSection.SETTINGS -> {
+                            wallpapersEditModeState.value = false
                             settingsIndexState.intValue = 0
                             activeSectionState.value = it
                         }
@@ -200,7 +221,16 @@ class MainActivity : ComponentActivity() {
                 isDarkMode = isDarkModeState.value,
                 onToggleDarkMode = { setDarkMode(!isDarkModeState.value) },
                 currentWallpaper = wallpaperState.value,
-                onSelectWallpaper = { setWallpaper(it) },
+                wallpapers = allWallpapers,
+                wallpapersEditMode = wallpapersEditModeState.value,
+                onWallpaperClick = { onWallpaperClicked(it) },
+                onToggleWallpapersEdit = { wallpapersEditModeState.value = !wallpapersEditModeState.value },
+                onSearchWallpapers = { entryFormState.value = EntryForm(EntryKind.WALLPAPER) },
+                onDictateWallpapers = { startVoice(VoiceInputMode.SearchWallpaper) },
+                wallpaperSearch = wallpaperSearchState.value,
+                wallpaperSearchIndex = wallpaperSearchIndexState.intValue,
+                onWallpaperPick = { pickWallpaperCell(it) },
+                onWallpaperDismiss = { closeWallpaperSearch() },
                 onLaunchApp = { pkg -> launchAppPackage(pkg) },
                 onToggleTask = { toggleTask(it) },
                 onToggleGrocery = { toggleGrocery(it) },
@@ -307,6 +337,8 @@ class MainActivity : ComponentActivity() {
 
     private fun resetToHome() {
         closeSearch()
+        closeWallpaperSearch()
+        wallpapersEditModeState.value = false
         calendarEditModeState.value = false
         moviesEditModeState.value = false
         showsEditModeState.value = false
@@ -340,6 +372,7 @@ class MainActivity : ComponentActivity() {
             is VoiceInputMode.AddGrocery -> "Dicta un artículo para la lista de compra"
             is VoiceInputMode.AddMovie -> "Dicta el título de la película"
             is VoiceInputMode.AddShow -> "Dicta el título de la serie"
+            is VoiceInputMode.SearchWallpaper -> "Dicta qué fondos buscar"
             is VoiceInputMode.AddCalendarEvent -> "Dicta el evento para ese día"
             else -> return
         }
@@ -413,11 +446,13 @@ class MainActivity : ComponentActivity() {
                 EntryKind.EVENT -> VoiceInputMode.AddCalendarEvent(form.dateStr ?: return)
                 EntryKind.MOVIE -> VoiceInputMode.AddMovie
                 EntryKind.SHOW -> VoiceInputMode.AddShow
+                EntryKind.WALLPAPER -> VoiceInputMode.SearchWallpaper
             }
             addEntry(mode, text, option, repeat)
             return
         }
         when (form.kind) {
+            EntryKind.WALLPAPER -> Unit
             EntryKind.MOVIE, EntryKind.SHOW -> {
                 val isShow = form.kind == EntryKind.SHOW
                 if (text.trim() != form.initialText.trim()) {
@@ -489,6 +524,7 @@ class MainActivity : ComponentActivity() {
             }
             is VoiceInputMode.AddMovie -> openSearch(false, text, option, null)
             is VoiceInputMode.AddShow -> openSearch(true, text, option, null)
+            is VoiceInputMode.SearchWallpaper -> openWallpaperSearch(text)
             is VoiceInputMode.None -> Unit
         }
     }
@@ -501,6 +537,162 @@ class MainActivity : ComponentActivity() {
         searchJob = lifecycleScope.launch {
             val results = TmdbClient.search(query, isShow)
             searchUiState.value = SearchUi(isShow, query.trim(), results ?: emptyList(), failed = results == null)
+        }
+    }
+
+    private fun loadCustomWallpapers() {
+        customWallpapersState.clear()
+        val raw = prefs.getString("custom_wallpapers", null) ?: return
+        runCatching {
+            val arr = JSONArray(raw)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                val path = o.getString("path")
+                if (File(path).exists()) {
+                    customWallpapersState.add(WallpaperItem(o.getString("id"), o.getString("label"), "file://$path", "Mis fondos"))
+                }
+            }
+        }
+    }
+
+    private fun saveCustomWallpapers() {
+        val arr = JSONArray()
+        customWallpapersState.forEach {
+            arr.put(JSONObject().put("id", it.id).put("label", it.name).put("path", it.assetPath.removePrefix("file://")))
+        }
+        prefs.edit().putString("custom_wallpapers", arr.toString()).apply()
+    }
+
+    private fun onWallpaperClicked(item: WallpaperItem) {
+        if (wallpapersEditModeState.value) {
+            if (item.isCustom()) deleteCustomWallpaper(item)
+        } else {
+            setWallpaper(item.assetPath)
+        }
+    }
+
+    private fun deleteCustomWallpaper(item: WallpaperItem) {
+        File(item.assetPath.removePrefix("file://")).delete()
+        customWallpapersState.removeAll { it.id == item.id }
+        saveCustomWallpapers()
+        if (wallpaperState.value == item.assetPath) setWallpaper(WallpaperCatalog.builtIns.first().assetPath)
+        val max = allWallpapers.size + 9
+        if (settingsIndexState.intValue > max) settingsIndexState.intValue = max
+    }
+
+    private fun openWallpaperSearch(query: String) {
+        wallpaperQuery = query.trim()
+        wallpaperPool.clear()
+        wallpaperOffset = 0
+        wallhavenPage = 1
+        wallhavenLastPage = 1
+        wallpaperSearchIndexState.intValue = 0
+        wallpaperSearchState.value = WallpaperSearchUi(wallpaperQuery, null)
+        wallpaperJob?.cancel()
+        wallpaperJob = lifecycleScope.launch {
+            val batch = WallpaperClient.searchFirst(wallpaperQuery)
+            wallpaperPool.addAll(batch.results)
+            wallhavenLastPage = batch.lastPage
+            refreshWallpaperUi(failed = batch.failed)
+        }
+    }
+
+    private fun refreshWallpaperUi(message: String? = null, busy: String? = null, failed: Boolean = false) {
+        val visible = wallpaperPool.drop(wallpaperOffset).take(WALLPAPER_PAGE_SIZE)
+        wallpaperSearchState.value = WallpaperSearchUi(
+            query = wallpaperQuery,
+            results = visible,
+            hasPrev = wallpaperOffset > 0,
+            hasMore = wallpaperPool.size - wallpaperOffset > WALLPAPER_PAGE_SIZE || wallhavenPage < wallhavenLastPage,
+            busy = busy,
+            message = message,
+            failed = failed && wallpaperPool.isEmpty()
+        )
+        val cells = visible.size + (if (wallpaperOffset > 0) 1 else 0) +
+            (if (wallpaperPool.size - wallpaperOffset > WALLPAPER_PAGE_SIZE || wallhavenPage < wallhavenLastPage) 1 else 0)
+        if (wallpaperSearchIndexState.intValue >= cells) wallpaperSearchIndexState.intValue = (cells - 1).coerceAtLeast(0)
+    }
+
+    private fun closeWallpaperSearch() {
+        wallpaperJob?.cancel()
+        wallpaperSearchState.value = null
+        wallpaperPool.clear()
+    }
+
+    private fun pickWallpaperCell(index: Int) {
+        val ui = wallpaperSearchState.value ?: return
+        val visible = ui.results ?: return
+        if (ui.busy != null) return
+        if (index < visible.size) {
+            downloadWallpaper(visible[index])
+            return
+        }
+        var next = visible.size
+        val prevIndex = if (ui.hasPrev) next++ else -1
+        val moreIndex = if (ui.hasMore) next else -1
+        when (index) {
+            prevIndex -> {
+                wallpaperOffset = (wallpaperOffset - WALLPAPER_PAGE_SIZE).coerceAtLeast(0)
+                wallpaperSearchIndexState.intValue = 0
+                refreshWallpaperUi()
+            }
+            moreIndex -> {
+                wallpaperJob?.cancel()
+                wallpaperJob = lifecycleScope.launch {
+                    if (wallpaperPool.size - (wallpaperOffset + WALLPAPER_PAGE_SIZE) < WALLPAPER_PAGE_SIZE && wallhavenPage < wallhavenLastPage) {
+                        refreshWallpaperUi(busy = "Cargando más…")
+                        val batch = WallpaperClient.searchMore(wallpaperQuery, wallhavenPage + 1)
+                        if (!batch.failed) {
+                            wallhavenPage += 1
+                            wallhavenLastPage = batch.lastPage
+                            val known = wallpaperPool.map { it.id }.toSet()
+                            wallpaperPool.addAll(batch.results.filter { it.id !in known })
+                        }
+                    }
+                    if (wallpaperOffset + WALLPAPER_PAGE_SIZE < wallpaperPool.size) wallpaperOffset += WALLPAPER_PAGE_SIZE
+                    wallpaperSearchIndexState.intValue = 0
+                    refreshWallpaperUi()
+                }
+            }
+        }
+    }
+
+    private fun downloadWallpaper(result: WallpaperResult) {
+        wallpaperJob?.cancel()
+        wallpaperJob = lifecycleScope.launch {
+            refreshWallpaperUi(busy = "Descargando fondo…")
+            val file = WallpaperClient.download(result, wallpaperDir)
+            if (file == null) {
+                refreshWallpaperUi(message = "No se pudo descargar ese fondo. Prueba con otro.")
+                return@launch
+            }
+            val path = "file://${file.path}"
+            if (customWallpapersState.none { it.assetPath == path }) {
+                customWallpapersState.add(0, WallpaperItem("${result.source}_${result.id}", result.label, path, "Mis fondos"))
+            }
+            while (customWallpapersState.size > MAX_CUSTOM_WALLPAPERS) {
+                val oldest = customWallpapersState.last { it.assetPath != path }
+                File(oldest.assetPath.removePrefix("file://")).delete()
+                customWallpapersState.remove(oldest)
+            }
+            saveCustomWallpapers()
+            setWallpaper(path)
+            refreshWallpaperUi(message = "✓ Fondo puesto. Elige otro o pulsa Atrás para volver.")
+        }
+    }
+
+    private fun handleWallpaperKey(keyCode: Int) {
+        val ui = wallpaperSearchState.value ?: return
+        val results = ui.results ?: return
+        if (ui.busy != null) return
+        val cells = results.size + (if (ui.hasPrev) 1 else 0) + (if (ui.hasMore) 1 else 0)
+        val idx = wallpaperSearchIndexState.intValue
+        when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT -> if (idx > 0) wallpaperSearchIndexState.intValue = idx - 1
+            KeyEvent.KEYCODE_DPAD_RIGHT -> if (idx < cells - 1) wallpaperSearchIndexState.intValue = idx + 1
+            KeyEvent.KEYCODE_DPAD_UP -> if (idx >= 5) wallpaperSearchIndexState.intValue = idx - 5
+            KeyEvent.KEYCODE_DPAD_DOWN -> if (idx + 5 < cells) wallpaperSearchIndexState.intValue = idx + 5
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> if (cells > 0) pickWallpaperCell(idx)
         }
     }
 
@@ -630,6 +822,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleBack() {
         when {
+            wallpaperSearchState.value != null -> closeWallpaperSearch()
             searchUiState.value != null -> closeSearch()
             entryFormState.value != null -> entryFormState.value = null
             calendarChoiceDateState.value != null -> calendarChoiceDateState.value = null
@@ -639,6 +832,7 @@ class MainActivity : ComponentActivity() {
             }
             appsEditModeState.value -> appsEditModeState.value = false
             calendarEditModeState.value -> calendarEditModeState.value = false
+            activeSectionState.value == ActiveSection.SETTINGS && wallpapersEditModeState.value -> wallpapersEditModeState.value = false
             activeSectionState.value == ActiveSection.SETTINGS -> {
                 activeSectionState.value = ActiveSection.APPS
                 appsGridIndexState.intValue = -2
@@ -664,6 +858,11 @@ class MainActivity : ComponentActivity() {
             return true
         }
         if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
+
+        if (wallpaperSearchState.value != null) {
+            handleWallpaperKey(event.keyCode)
+            return true
+        }
 
         if (searchUiState.value != null) {
             handleSearchKey(event.keyCode)
@@ -774,23 +973,41 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleSettingsKey(keyCode: Int): Boolean {
-        val wallpapersCount = WallpaperCatalog.items.size
+        val items = allWallpapers
+        val lastWallpaper = 10 + items.size - 1
         val idx = settingsIndexState.intValue
         val inThemeCard = idx in 0..2
+        val inChips = idx in 7..9
         when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_UP -> settingsIndexState.intValue =
-                if (inThemeCard) (if (idx > 0) idx - 1 else 2)
-                else if (idx > 10) idx - 1 else 10 + wallpapersCount - 1
-            KeyEvent.KEYCODE_DPAD_DOWN -> settingsIndexState.intValue =
-                if (inThemeCard) (if (idx < 2) idx + 1 else 0)
-                else if (idx < 10 + wallpapersCount - 1) idx + 1 else 10
-            KeyEvent.KEYCODE_DPAD_LEFT -> if (!inThemeCard) settingsIndexState.intValue = (idx - 10).coerceIn(0, 2)
-            KeyEvent.KEYCODE_DPAD_RIGHT -> if (inThemeCard) settingsIndexState.intValue = 10 + idx.coerceAtMost(wallpapersCount - 1)
+            KeyEvent.KEYCODE_DPAD_UP -> settingsIndexState.intValue = when {
+                inThemeCard -> if (idx > 0) idx - 1 else 2
+                inChips -> idx
+                idx == 10 -> 8
+                else -> idx - 1
+            }
+            KeyEvent.KEYCODE_DPAD_DOWN -> settingsIndexState.intValue = when {
+                inThemeCard -> if (idx < 2) idx + 1 else 0
+                inChips -> 10
+                idx < lastWallpaper -> idx + 1
+                else -> idx
+            }
+            KeyEvent.KEYCODE_DPAD_LEFT -> when {
+                idx in 8..9 -> settingsIndexState.intValue = idx - 1
+                idx == 7 -> settingsIndexState.intValue = 0
+                idx >= 10 -> settingsIndexState.intValue = (idx - 10).coerceIn(0, 2)
+            }
+            KeyEvent.KEYCODE_DPAD_RIGHT -> when {
+                inThemeCard -> settingsIndexState.intValue = 10 + idx.coerceAtMost(items.size - 1)
+                idx in 7..8 -> settingsIndexState.intValue = idx + 1
+            }
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> when (idx) {
                 0 -> setDarkMode(true)
                 1 -> setDarkMode(false)
                 2 -> launchAppPackage("com.android.tv.settings")
-                else -> WallpaperCatalog.items.getOrNull(idx - 10)?.let { setWallpaper(it.assetPath) }
+                7 -> wallpapersEditModeState.value = !wallpapersEditModeState.value
+                8 -> entryFormState.value = EntryForm(EntryKind.WALLPAPER)
+                9 -> startVoice(VoiceInputMode.SearchWallpaper)
+                else -> items.getOrNull(idx - 10)?.let { onWallpaperClicked(it) }
             }
             else -> return false
         }

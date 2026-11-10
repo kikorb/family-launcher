@@ -7,7 +7,7 @@ A family dashboard that replaces the Google TV home screen on a Chromecast with 
 - **Right**: family tasks and shopping list, synced with Notion. Add by voice (🎤 Dictar) or keyboard (⌨ Añadir), pick *Quién* / *Tipo* from your Notion options, and edit existing items (✎ Editar).
 - **Down**: all apps. The ★ Favoritas button picks which 5 appear on the home dock.
 - **Left**: films and TV shows to watch, synced with Notion. Add by voice or keyboard, pick the right match with poster, year and rating from TMDB, tag who recommended it (*Quién*), and tick it off once seen.
-- **Apps drawer → ⚙ Ajustes**: light/dark mode, wallpapers and the TV's system settings.
+- **Apps drawer → ⚙ Ajustes**: light/dark mode, wallpapers (built-in and searchable gallery) and the TV's system settings.
 
 Every list screen uses the same pattern: **✎ Editar** turns edit mode on (OK on an item opens its form), otherwise OK does the item's main action (tick, launch, add). Back leaves edit mode, then the screen.
 
@@ -66,7 +66,16 @@ Wireless debugging may turn itself off after a reboot. The launcher has an *Ajus
 
 ## Wallpapers
 
-The Fedora 37, 42 and 43 default wallpapers are bundled (Fedora Project artwork, CC BY-SA 4.0). Other wallpapers are listed in `ALL_WALLPAPERS` (`data/Models.kt`) but their image files are not in the repo. Drop your own files into `app/src/main/assets/` and add entries to that list. Any entry whose file is missing is hidden at runtime.
+Three wallpapers ship with the app so it looks right out of the box: the Fedora 37, 42 and 43 defaults (Fedora Project artwork, CC BY-SA 4.0).
+
+Everyone at home can add more from the TV: **Apps drawer → ⚙ Ajustes → 🔎 Buscar** (or 🎤 Dictar, handy for kids). Type something like *pokemon* or *Érase una vez* and a gallery of thumbnails appears. OK on a picture downloads it, shrinks it to 1080p and puts it on the TV; you can pick several in a row, page through results with *Más ▶*, and remove your own with ✎ Editar. Up to 15 of your own are kept, oldest first out.
+
+Images come from two sources, mixed together:
+
+- [TMDB](https://www.themoviedb.org/) backdrops: official stills for films and shows (uses the same `TMDB_API_KEY`).
+- [Wallhaven](https://wallhaven.cc/): fan art, games and anime. No key is needed for the safe-for-work search the app uses (`purity=100`, 16:9, at least 1920x1080).
+
+This is meant for a private home TV: the app does not check image licences, so do not redistribute what it downloads.
 
 ## Notes
 

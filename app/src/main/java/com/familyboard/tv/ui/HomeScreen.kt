@@ -115,7 +115,16 @@ fun HomeScreen(
     isDarkMode: Boolean,
     onToggleDarkMode: () -> Unit,
     currentWallpaper: String,
-    onSelectWallpaper: (String) -> Unit,
+    wallpapers: List<WallpaperItem>,
+    wallpapersEditMode: Boolean = false,
+    onWallpaperClick: (WallpaperItem) -> Unit = {},
+    onToggleWallpapersEdit: () -> Unit = {},
+    onSearchWallpapers: () -> Unit = {},
+    onDictateWallpapers: () -> Unit = {},
+    wallpaperSearch: WallpaperSearchUi? = null,
+    wallpaperSearchIndex: Int = 0,
+    onWallpaperPick: (Int) -> Unit = {},
+    onWallpaperDismiss: () -> Unit = {},
     onLaunchApp: (String) -> Unit,
     onToggleTask: (Int) -> Unit,
     onToggleGrocery: (Int) -> Unit,
@@ -266,8 +275,13 @@ fun HomeScreen(
                 isDarkMode = isDarkMode,
                 focusedIndex = settingsFocusedIndex,
                 currentWallpaper = currentWallpaper,
+                wallpapers = wallpapers,
+                wallpapersEditMode = wallpapersEditMode,
                 onToggleDarkMode = onToggleDarkMode,
-                onSelectWallpaper = onSelectWallpaper
+                onWallpaperClick = onWallpaperClick,
+                onToggleWallpapersEdit = onToggleWallpapersEdit,
+                onSearchWallpapers = onSearchWallpapers,
+                onDictateWallpapers = onDictateWallpapers
             )
         }
 
@@ -358,6 +372,7 @@ fun HomeScreen(
                             is VoiceInputMode.AddGrocery -> "Dicta un artículo para la compra"
                             is VoiceInputMode.AddMovie -> "Dicta el título de la película"
                             is VoiceInputMode.AddShow -> "Dicta el título de la serie"
+                            is VoiceInputMode.SearchWallpaper -> "Dicta qué fondos buscar"
                             is VoiceInputMode.AddCalendarEvent -> "Dicta el evento para ${voiceInputMode.dateStr}"
                             else -> "Escuchando voz..."
                         },
@@ -394,10 +409,21 @@ fun HomeScreen(
                     EntryKind.GROCERY -> groceryTypeOptions
                     EntryKind.EVENT -> eventTypeOptions
                     EntryKind.MOVIE, EntryKind.SHOW -> watch.whoOptions
+                    EntryKind.WALLPAPER -> emptyList()
                 },
                 isDarkMode = isDarkMode,
                 onSubmit = onSubmitEntry,
                 onCancel = onCancelEntry
+            )
+        }
+
+        if (wallpaperSearch != null) {
+            WallpaperSearchOverlay(
+                ui = wallpaperSearch,
+                selectedIndex = wallpaperSearchIndex,
+                isDarkMode = isDarkMode,
+                onPick = onWallpaperPick,
+                onDismiss = onWallpaperDismiss
             )
         }
 
@@ -531,12 +557,14 @@ private fun EntryFormOverlay(
     val stop = androidx.compose.ui.focus.FocusRequester.Cancel
     val hasToggle = form.kind == EntryKind.EVENT
     val belowChips = if (hasToggle) toggleRequester else addRequester
-    val aboveButtons = if (hasToggle) toggleRequester else (chipRequesters[selected] ?: focusRequester)
+    val selectedChip = if (options.isNotEmpty()) chipRequesters[selected] else null
+    val aboveButtons = if (hasToggle) toggleRequester else (selectedChip ?: focusRequester)
 
     val isEdit = form.editId != null
     val isWatch = form.kind == EntryKind.MOVIE || form.kind == EntryKind.SHOW
     val optionLabel = if (form.kind == EntryKind.TASK || isWatch) "Quién" else "Tipo"
     val heading = when (form.kind) {
+        EntryKind.WALLPAPER -> "Buscar fondos de pantalla"
         EntryKind.MOVIE -> if (isEdit) "Editar película" else "Nueva película"
         EntryKind.SHOW -> if (isEdit) "Editar serie" else "Nueva serie"
         EntryKind.TASK -> if (isEdit) "Editar tarea" else "Nueva tarea familiar"
@@ -584,12 +612,12 @@ private fun EntryFormOverlay(
                 ),
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onNext = {
                     keyboard?.hide()
-                    (chipRequesters[selected] ?: belowChips).requestFocus()
+                    (selectedChip ?: belowChips).requestFocus()
                 }),
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusProperties {
-                        down = chipRequesters[selected] ?: belowChips
+                        down = selectedChip ?: belowChips
                         up = stop
                         left = stop
                         right = stop
@@ -670,7 +698,7 @@ private fun EntryFormOverlay(
                     modifier = Modifier
                         .focusRequester(toggleRequester)
                         .focusProperties {
-                            up = chipRequesters[selected] ?: focusRequester
+                            up = selectedChip ?: focusRequester
                             down = addRequester
                             left = stop
                             right = stop
@@ -705,6 +733,7 @@ private fun EntryFormOverlay(
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 OverlayButton(
                     label = when {
+                        form.kind == EntryKind.WALLPAPER -> "🔎 Buscar"
                         isWatch && (!isEdit || text.trim() != form.initialText.trim()) -> "🔎 Buscar"
                         isEdit -> "✓ Guardar"
                         else -> "✓ Añadir"
@@ -1049,8 +1078,13 @@ fun SettingsWallpaperScreen(
     isDarkMode: Boolean,
     focusedIndex: Int,
     currentWallpaper: String,
+    wallpapers: List<WallpaperItem>,
+    wallpapersEditMode: Boolean,
     onToggleDarkMode: () -> Unit,
-    onSelectWallpaper: (String) -> Unit
+    onWallpaperClick: (WallpaperItem) -> Unit,
+    onToggleWallpapersEdit: () -> Unit,
+    onSearchWallpapers: () -> Unit,
+    onDictateWallpapers: () -> Unit
 ) {
     val context = LocalContext.current
     val titleColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
@@ -1185,11 +1219,11 @@ fun SettingsWallpaperScreen(
                 }
             }
 
-            val wallpapers = WallpaperCatalog.items
             val wallpaperListState = rememberLazyListState()
             LaunchedEffect(focusedIndex) {
                 if (focusedIndex >= 10) wallpaperListState.ensureVisible(focusedIndex - 10)
             }
+            val amber = Color(0xFFFBBF24)
 
             Column(
                 modifier = Modifier
@@ -1198,14 +1232,33 @@ fun SettingsWallpaperScreen(
                     .clip(RoundedCornerShape(20.dp))
                     .background(cardBg)
                     .border(1.5.dp, cardBorder, RoundedCornerShape(20.dp))
-                    .padding(24.dp)
+                    .padding(20.dp)
             ) {
                 Text(text = "🖼️ Fondos de Pantalla", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = titleColor)
-                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = if (wallpapersEditMode) "Pulsa OK sobre un fondo tuyo para quitarlo" else "${wallpapers.size} fondos",
+                    fontSize = 12.sp,
+                    color = if (wallpapersEditMode) amber else subtextColor
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    HeaderChip(
+                        label = if (wallpapersEditMode) "✓ Listo" else "✎ Editar",
+                        focused = focusedIndex == 7,
+                        isDarkMode = isDarkMode,
+                        titleColor = titleColor,
+                        cardBorder = cardBorder,
+                        active = wallpapersEditMode,
+                        onClick = onToggleWallpapersEdit
+                    )
+                    HeaderChip("🔎 Buscar", focusedIndex == 8, isDarkMode, titleColor, cardBorder, onClick = onSearchWallpapers)
+                    HeaderChip("🎤 Dictar", focusedIndex == 9, isDarkMode, titleColor, cardBorder, onClick = onDictateWallpapers)
+                }
+                Spacer(modifier = Modifier.height(10.dp))
 
                 LazyColumn(
                     state = wallpaperListState,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(vertical = 4.dp, horizontal = 4.dp),
                     modifier = Modifier
                         .weight(1f)
@@ -1214,6 +1267,7 @@ fun SettingsWallpaperScreen(
                     itemsIndexed(wallpapers) { wIdx, wall ->
                         val isWallFocused = focusedIndex == 10 + wIdx
                         val isWallSelected = currentWallpaper == wall.assetPath
+                        val removable = wallpapersEditMode && wall.isCustom()
 
                         Row(
                             modifier = Modifier
@@ -1223,30 +1277,127 @@ fun SettingsWallpaperScreen(
                                 .background(if (isWallFocused) Color(0x3338BDF8) else if (isWallSelected) Color(0x180284C7) else Color(0x0A000000))
                                 .border(
                                     width = if (isWallFocused) 2.5.dp else if (isWallSelected) 1.5.dp else 1.dp,
-                                    color = if (isWallFocused) FocusCyan else if (isWallSelected) Color(0xFF0284C7) else cardBorder,
+                                    color = if (isWallFocused) FocusCyan else if (isWallSelected) Color(0xFF0284C7) else if (removable) amber else cardBorder,
                                     shape = RoundedCornerShape(14.dp)
                                 )
-                                .clickable { onSelectWallpaper(wall.assetPath) }
-                                .padding(14.dp),
+                                .clickable { onWallpaperClick(wall) }
+                                .padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Text(
-                                text = if (isWallSelected) "✓" else "○",
-                                color = if (isWallSelected) FocusCyan else subtextColor,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
+                            AsyncImage(
+                                model = wall.assetPath,
+                                contentDescription = wall.name,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(width = 80.dp, height = 45.dp)
+                                    .clip(RoundedCornerShape(8.dp))
                             )
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(text = wall.name, fontWeight = FontWeight.Bold, color = titleColor, fontSize = 15.sp)
+                                Text(
+                                    text = wall.name,
+                                    fontWeight = FontWeight.Bold,
+                                    color = titleColor,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                                 if (wall.subtitle.isNotEmpty()) {
                                     Text(text = wall.subtitle, fontSize = 11.sp, color = subtextColor)
                                 }
                             }
-                            if (isWallSelected) {
-                                Text(text = "Activo", color = FocusCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            when {
+                                removable -> Text(text = "🗑", fontSize = 16.sp, color = amber)
+                                isWallSelected -> Text(text = "✓ Activo", color = FocusCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun WallpaperSearchOverlay(
+    ui: WallpaperSearchUi,
+    selectedIndex: Int,
+    isDarkMode: Boolean,
+    onPick: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val titleColor = if (isDarkMode) Color.White else Color(0xFF0F172A)
+    val subtextColor = if (isDarkMode) Color(0xFF94A3B8) else Color(0xFF64748B)
+    val results = ui.results
+    val cellCount = (results?.size ?: 0) + (if (ui.hasPrev) 1 else 0) + (if (ui.hasMore) 1 else 0)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xE6000000))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .clip(RoundedCornerShape(24.dp))
+                .background(if (isDarkMode) Color(0xFF1E293B) else Color.White)
+                .border(1.5.dp, FocusCyan, RoundedCornerShape(24.dp))
+                .padding(18.dp)
+        ) {
+            Text(text = "Fondos: «${ui.query}»", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = titleColor)
+            Text(
+                text = when {
+                    ui.busy != null -> ui.busy
+                    ui.message != null -> ui.message
+                    results == null -> "Buscando…"
+                    ui.failed -> "No se pudo buscar. Revisa la conexión."
+                    results.isEmpty() -> "Sin resultados. Prueba con otra búsqueda."
+                    else -> "OK pone el fondo en la tele. Puedes elegir varios. Atrás para salir."
+                },
+                fontSize = 13.sp,
+                color = if (ui.message != null) FocusCyan else subtextColor
+            )
+            if (results != null) {
+                val cells = results.map<WallpaperResult, WallpaperResult?> { it } +
+                    (if (ui.hasPrev) listOf(null) else emptyList()) +
+                    (if (ui.hasMore) listOf(null) else emptyList())
+                cells.indices.chunked(5).forEach { rowIdx ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        rowIdx.forEach { i ->
+                            val focused = i == selectedIndex
+                            val item = cells[i]
+                            val navLabel = if (i == results.size && ui.hasPrev) "◀ Antes" else "Más ▶"
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(16f / 9f)
+                                    .scale(if (focused) 1.05f else 1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isDarkMode) Color(0x22FFFFFF) else Color(0x14000000))
+                                    .border(
+                                        width = if (focused) 3.dp else 1.dp,
+                                        color = if (focused) FocusCyan else if (isDarkMode) Color(0x33FFFFFF) else Color(0x22000000),
+                                        shape = RoundedCornerShape(10.dp)
+                                    )
+                                    .clickable { onPick(i) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (item != null) {
+                                    AsyncImage(
+                                        model = item.thumbUrl,
+                                        contentDescription = item.label,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Text(text = navLabel, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = titleColor)
+                                }
+                            }
+                        }
+                        repeat(5 - rowIdx.size) { Spacer(modifier = Modifier.weight(1f)) }
                     }
                 }
             }

@@ -75,13 +75,10 @@ fun List<FamilyTask>.visibleTasks(now: Long = System.currentTimeMillis()): List<
 fun List<GroceryItem>.visibleGroceries(now: Long = System.currentTimeMillis()): List<GroceryItem> =
     filter { !it.completed || it.completedAt == null || now - it.completedAt < SEVEN_DAYS_MS }
 
-val ALL_WALLPAPERS = listOf(
-    WallpaperItem("alhambra", "Alhambra & Palacio", "file:///android_asset/wallpaper_alhambra.jpg", "Vistas clásicas del palacio andaluz"),
-    WallpaperItem("interior", "Salón Moderno / Interior", "file:///android_asset/wallpaper_interior.jpg", "Ambiente cálido y acogedor"),
-    WallpaperItem("fedora37", "Fedora 37 Default", "file:///android_asset/wallpaper_fedora37.jpg", "Fondo oficial abstracto azul"),
-    WallpaperItem("fedora42", "Fedora 42 Default", "file:///android_asset/wallpaper_fedora42.jpg", "Fondo oficial geométrico moderno"),
-    WallpaperItem("fedora43", "Fedora 43 Default", "file:///android_asset/wallpaper_fedora43.jpg", "Fondo oficial paisaje estilizado"),
-    WallpaperItem("art_room", "Estudio & Pintura", "file:///android_asset/wallpaper_art_room.jpg", "Ilustración artística cálida")
+val BUILT_IN_WALLPAPERS = listOf(
+    WallpaperItem("fedora37", "Fedora 37", "file:///android_asset/wallpaper_fedora37.jpg", "Incluido"),
+    WallpaperItem("fedora42", "Fedora 42", "file:///android_asset/wallpaper_fedora42.jpg", "Incluido"),
+    WallpaperItem("fedora43", "Fedora 43", "file:///android_asset/wallpaper_fedora43.jpg", "Incluido")
 )
 
 data class NotionOptions(
@@ -91,7 +88,7 @@ data class NotionOptions(
     val watchWho: List<String> = emptyList()
 )
 
-enum class EntryKind { TASK, GROCERY, EVENT, MOVIE, SHOW }
+enum class EntryKind { TASK, GROCERY, EVENT, MOVIE, SHOW, WALLPAPER }
 
 data class EntryForm(
     val kind: EntryKind,
@@ -103,14 +100,34 @@ data class EntryForm(
 )
 
 object WallpaperCatalog {
-    var items: List<WallpaperItem> = ALL_WALLPAPERS
+    var builtIns: List<WallpaperItem> = BUILT_IN_WALLPAPERS
         private set
 
     fun load(bundledAssets: Set<String>) {
-        items = ALL_WALLPAPERS.filter { it.assetPath.substringAfterLast('/') in bundledAssets }
-            .ifEmpty { ALL_WALLPAPERS.take(1) }
+        builtIns = BUILT_IN_WALLPAPERS.filter { it.assetPath.substringAfterLast('/') in bundledAssets }
+            .ifEmpty { BUILT_IN_WALLPAPERS.take(1) }
     }
 }
+
+data class WallpaperResult(
+    val id: String,
+    val source: String,
+    val thumbUrl: String,
+    val fullUrl: String,
+    val label: String
+)
+
+data class WallpaperSearchUi(
+    val query: String,
+    val results: List<WallpaperResult>?,
+    val hasPrev: Boolean = false,
+    val hasMore: Boolean = false,
+    val busy: String? = null,
+    val message: String? = null,
+    val failed: Boolean = false
+)
+
+fun WallpaperItem.isCustom(): Boolean = !assetPath.startsWith("file:///android_asset/")
 
 private fun isLeapYear(year: Int) = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 
