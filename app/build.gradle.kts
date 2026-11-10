@@ -12,6 +12,8 @@ android {
         applicationId = "com.familyboard.tv"
         minSdk = 28
         targetSdk = 34
+        ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") }
+        resourceConfigurations += listOf("es", "en")
         versionCode = 3
         versionName = "1.2.0"
 

@@ -108,7 +108,7 @@ class MainActivity : ComponentActivity() {
         wallpaperState.value = WallpaperCatalog.items.first().assetPath
 
         isDarkModeState.value = prefs.getBoolean("dark", true)
-        val savedWallpaper = prefs.getString("wallpaper", null)
+        val savedWallpaper = prefs.getString("wallpaper", null)?.replace("wallpaper_fedora43.png", "wallpaper_fedora43.jpg")
         if (savedWallpaper != null && WallpaperCatalog.items.any { it.assetPath == savedWallpaper }) {
             wallpaperState.value = savedWallpaper
         }
